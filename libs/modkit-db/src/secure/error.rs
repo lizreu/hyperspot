@@ -2,9 +2,10 @@ use uuid::Uuid;
 
 /// Errors that can occur during scoped query execution.
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum ScopeError {
     /// Database error occurred during query execution.
-    #[error("database error: {0}")]
+    #[error("database error")]
     Db(#[from] sea_orm::DbErr),
 
     /// Invalid scope configuration.

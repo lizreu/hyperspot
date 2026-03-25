@@ -743,7 +743,7 @@ impl SecureConn {
     {
         let txn = match self.conn_internal().begin().await {
             Ok(t) => t,
-            Err(e) => return (self, Err(TxError::Infra(InfraError::new(e.to_string())))),
+            Err(e) => return (self, Err(TxError::Infra(InfraError::new(e)))),
         };
         let tx = SecureTx::new(&txn);
 
@@ -752,7 +752,7 @@ impl SecureConn {
         match res {
             Ok(v) => match txn.commit().await {
                 Ok(()) => (self, Ok(v)),
-                Err(e) => (self, Err(TxError::Infra(InfraError::new(e.to_string())))),
+                Err(e) => (self, Err(TxError::Infra(InfraError::new(e)))),
             },
             Err(e) => {
                 _ = txn.rollback().await;

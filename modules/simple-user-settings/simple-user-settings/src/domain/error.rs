@@ -17,7 +17,7 @@ pub enum DomainError {
     #[error("Internal error: {0}")]
     Internal(String),
 
-    #[error("Database error: {0}")]
+    #[error("Database error")]
     Database(#[from] DbError),
 }
 

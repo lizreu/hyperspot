@@ -443,7 +443,7 @@ impl Db {
 
         let txn = match self.handle.sea_internal_ref().begin().await {
             Ok(txn) => txn,
-            Err(e) => return (self, Err(TxError::Infra(InfraError::new(e.to_string())))),
+            Err(e) => return (self, Err(TxError::Infra(InfraError::new(e)))),
         };
 
         let tx = DbTx { tx: &txn };
@@ -454,7 +454,7 @@ impl Db {
         match res {
             Ok(v) => match txn.commit().await {
                 Ok(()) => (self, Ok(v)),
-                Err(e) => (self, Err(TxError::Infra(InfraError::new(e.to_string())))),
+                Err(e) => (self, Err(TxError::Infra(InfraError::new(e)))),
             },
             Err(e) => {
                 _ = txn.rollback().await;

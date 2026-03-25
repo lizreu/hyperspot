@@ -33,6 +33,17 @@ use modkit_security::{AccessScope, ScopeConstraint, ScopeFilter, ScopeValue};
 use crate::constraints::{Constraint, Predicate};
 use crate::models::EvaluationResponse;
 
+/// Private error for a single predicate/value conversion failure.
+#[derive(Debug, thiserror::Error)]
+enum ConstraintError {
+    #[error("unsupported property: {0}")]
+    UnsupportedProperty(String),
+    #[error("unsupported JSON value type for scope filter: {got}")]
+    UnsupportedValueType { got: String },
+    #[error("only integer JSON numbers are supported for scope filters, got: {got}")]
+    NonIntegerNumber { got: String },
+}
+
 /// Error during constraint compilation.
 #[derive(Debug, thiserror::Error)]
 pub enum ConstraintCompileError {
@@ -84,7 +95,7 @@ pub fn compile_to_access_scope(
 
     // Step 2: Compile each constraint
     let mut constraints = Vec::new();
-    let mut fail_reasons: Vec<String> = Vec::new();
+    let mut fail_reasons: Vec<ConstraintError> = Vec::new();
 
     for constraint in &response.context.constraints {
         match compile_constraint(constraint, supported_properties) {
@@ -102,7 +113,11 @@ pub fn compile_to_access_scope(
     // If no constraint compiled successfully, fail-closed
     if constraints.is_empty() {
         return Err(ConstraintCompileError::AllConstraintsFailed {
-            reason: fail_reasons.join("; "),
+            reason: fail_reasons
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; "),
         });
     }
 
@@ -121,7 +136,7 @@ pub fn compile_to_access_scope(
 fn compile_constraint(
     constraint: &Constraint,
     supported_properties: &[&str],
-) -> Result<ScopeConstraint, String> {
+) -> Result<ScopeConstraint, ConstraintError> {
     let mut filters = Vec::new();
 
     for predicate in &constraint.predicates {
@@ -181,7 +196,7 @@ fn compile_constraint(
         };
 
         if !supported_properties.contains(&property) {
-            return Err(format!("unsupported property: {property}"));
+            return Err(ConstraintError::UnsupportedProperty(property.to_owned()));
         }
 
         filters.push(filter);
@@ -194,7 +209,7 @@ fn compile_constraint(
 ///
 /// UUID strings are detected and stored as `ScopeValue::Uuid`;
 /// other strings become `ScopeValue::String`.
-fn json_to_scope_value(v: &serde_json::Value) -> Result<ScopeValue, String> {
+fn json_to_scope_value(v: &serde_json::Value) -> Result<ScopeValue, ConstraintError> {
     match v {
         serde_json::Value::String(s) => {
             if let Ok(uuid) = uuid::Uuid::parse_str(s) {
@@ -203,13 +218,14 @@ fn json_to_scope_value(v: &serde_json::Value) -> Result<ScopeValue, String> {
                 Ok(ScopeValue::String(s.clone()))
             }
         }
-        serde_json::Value::Number(n) => n.as_i64().map(ScopeValue::Int).ok_or_else(|| {
-            format!("only integer JSON numbers are supported for scope filters, got: {n}")
-        }),
+        serde_json::Value::Number(n) => n
+            .as_i64()
+            .map(ScopeValue::Int)
+            .ok_or_else(|| ConstraintError::NonIntegerNumber { got: n.to_string() }),
         serde_json::Value::Bool(b) => Ok(ScopeValue::Bool(*b)),
-        other => Err(format!(
-            "unsupported JSON value type for scope filter: {other}"
-        )),
+        other => Err(ConstraintError::UnsupportedValueType {
+            got: other.to_string(),
+        }),
     }
 }
 

@@ -9,33 +9,41 @@ use std::fmt;
 ///
 /// This wraps database errors (connection issues, constraint violations, etc.)
 /// in a type that does not expose `SeaORM` internals.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct InfraError {
-    message: String,
+    source: Box<dyn std::error::Error + Send + Sync>,
 }
 
 impl InfraError {
-    /// Create a new infrastructure error from a message.
-    pub fn new(message: impl Into<String>) -> Self {
+    /// Create a new infrastructure error from a source error.
+    pub fn new(source: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
         Self {
-            message: message.into(),
+            source: source.into(),
         }
     }
 
     /// Get the error message.
+    ///
+    /// # Deprecated
+    /// Use [`std::error::Error::source`] to access the underlying error instead.
     #[must_use]
-    pub fn message(&self) -> &str {
-        &self.message
+    #[deprecated(note = "use `std::error::Error::source()` to access the underlying error")]
+    pub fn message(&self) -> String {
+        self.source.to_string()
     }
 }
 
 impl fmt::Display for InfraError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)
+        write!(f, "{}", self.source)
     }
 }
 
-impl std::error::Error for InfraError {}
+impl std::error::Error for InfraError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
 
 /// Transaction error that distinguishes domain errors from infrastructure errors.
 ///
@@ -54,7 +62,8 @@ impl std::error::Error for InfraError {}
 ///
 /// let user = result.map_err(|e| e.into_domain(DomainError::database_infra))?;
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug)]
+#[non_exhaustive]
 pub enum TxError<E> {
     /// A domain error returned from the transaction callback.
     Domain(E),

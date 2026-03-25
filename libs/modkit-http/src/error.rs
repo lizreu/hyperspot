@@ -1,6 +1,26 @@
 use std::time::Duration;
 use thiserror::Error;
 
+/// Errors that can occur when building a TLS client configuration.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum TlsConfigError {
+    /// OS certificate store is empty — no native root CA certificates were found.
+    #[error("no native root CA certificates found in OS certificate store")]
+    NoNativeRoots,
+    /// Certificates were found but none could be parsed successfully.
+    #[error("no valid native root CA certificates parsed ({found} loaded, {parse_failed} failed)")]
+    NoValidNativeRoots {
+        /// Number of certificates found in the store.
+        found: usize,
+        /// Number of certificates that failed to parse.
+        parse_failed: usize,
+    },
+    /// The TLS library rejected the requested protocol version set.
+    #[error("failed to configure TLS protocol versions")]
+    ProtocolVersions(#[source] rustls::Error),
+}
+
 /// Classification of URL validation failures.
 ///
 /// Provides programmatic matching for different failure modes without
@@ -35,15 +55,15 @@ pub enum InvalidUriKind {
 #[non_exhaustive]
 pub enum HttpError {
     /// Request building failed
-    #[error("Failed to build request: {0}")]
+    #[error("Failed to build request")]
     RequestBuild(#[from] http::Error),
 
     /// Invalid header name
-    #[error("Invalid header name: {0}")]
+    #[error("Invalid header name")]
     InvalidHeaderName(#[from] http::header::InvalidHeaderName),
 
     /// Invalid header value
-    #[error("Invalid header value: {0}")]
+    #[error("Invalid header value")]
     InvalidHeaderValue(#[from] http::header::InvalidHeaderValue),
 
     /// Single request attempt timed out
@@ -55,11 +75,11 @@ pub enum HttpError {
     DeadlineExceeded(std::time::Duration),
 
     /// Transport error (network, connection, etc)
-    #[error("Transport error: {0}")]
+    #[error("HTTP transport failed")]
     Transport(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// TLS error
-    #[error("TLS error: {0}")]
+    #[error("TLS error")]
     Tls(#[source] Box<dyn std::error::Error + Send + Sync>),
 
     /// Response body exceeded size limit
@@ -77,11 +97,11 @@ pub enum HttpError {
     },
 
     /// JSON parsing error
-    #[error("JSON parsing failed: {0}")]
+    #[error("JSON parsing failed")]
     Json(#[from] serde_json::Error),
 
     /// Form URL encoding error
-    #[error("Form encoding failed: {0}")]
+    #[error("Form encoding failed")]
     FormEncode(#[from] serde_urlencoded::ser::Error),
 
     /// Service overloaded (concurrency limit reached, fail-fast)

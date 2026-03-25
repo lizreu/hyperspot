@@ -31,6 +31,7 @@ use xxhash_rust::xxh3::xxh3_64;
 
 /// Errors that can occur during migration execution.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum MigrationError {
     /// Failed to create the migration history table.
     #[error("failed to create migration table for module '{module}': {source}")]

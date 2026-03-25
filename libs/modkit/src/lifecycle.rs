@@ -102,6 +102,7 @@ pub trait Runnable: Send + Sync + 'static {
 
 /// Library-level error for lifecycle operations.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum LifecycleError {
     #[error("already started")]
     AlreadyStarted,

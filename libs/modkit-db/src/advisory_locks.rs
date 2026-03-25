@@ -324,8 +324,9 @@ impl LockManager {
 // --------------------------- Errors ------------------------------------------
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum DbLockError {
-    #[error("I/O error: {0}")]
+    #[error("I/O error")]
     Io(#[from] std::io::Error),
 
     #[error("Lock already held: {lock_name}")]

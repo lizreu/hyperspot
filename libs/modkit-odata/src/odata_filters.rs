@@ -7,6 +7,7 @@ pub use crate::odata_parse::parse_str;
 
 /// Represents various errors that can occur during parsing.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ParseError {
     /// Error during general parsing.
     #[error("Error during general parsing: {0}")]

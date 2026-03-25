@@ -161,6 +161,7 @@ pub type Result<T> = std::result::Result<T, DbError>;
 
 /// Typed error for the DB handle and helpers.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum DbError {
     #[error("Unknown DSN: {0}")]
     UnknownDsn(String),
@@ -192,7 +193,7 @@ pub enum DbError {
         source: std::env::VarError,
     },
 
-    #[error("URL parsing error: {0}")]
+    #[error("URL parsing error")]
     UrlParse(#[from] url::ParseError),
 
     #[cfg(any(feature = "pg", feature = "mysql", feature = "sqlite"))]

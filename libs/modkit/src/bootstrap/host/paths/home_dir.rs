@@ -5,12 +5,13 @@ use std::{
 
 /// Errors for resolving the home directory
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum HomeDirError {
     #[error("HOME environment variable is not set")]
     HomeMissing,
     #[error("failed to get executable path: {0}")]
     ExecutablePathError(String),
-    #[error("IO error: {0}")]
+    #[error("IO error")]
     Io(#[from] std::io::Error),
 }
 

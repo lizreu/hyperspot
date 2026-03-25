@@ -35,11 +35,11 @@ pub enum EnforcerError {
     },
 
     /// The `AuthZ` evaluation RPC failed.
-    #[error("authorization evaluation failed: {0}")]
+    #[error("authorization evaluation failed")]
     EvaluationFailed(#[from] AuthZResolverError),
 
     /// Constraint compilation failed (missing or unsupported constraints).
-    #[error("constraint compilation failed: {0}")]
+    #[error("constraint compilation failed")]
     CompileFailed(#[from] ConstraintCompileError),
 }
 

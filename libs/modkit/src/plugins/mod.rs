@@ -101,6 +101,7 @@ impl GtsPluginSelector {
 
 /// Error returned by [`choose_plugin_instance`].
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ChoosePluginError {
     /// Failed to deserialize a plugin instance's content.
     #[error("invalid plugin instance content for '{gts_id}': {reason}")]
@@ -176,7 +177,7 @@ where
             return Err(ChoosePluginError::InvalidPluginInstance {
                 gts_id: gts_id.to_owned(),
                 reason: format!(
-                    "content.id mismatch: expected {:?}, got {:?}",
+                    "content.id mismatch: expected {}, got {}",
                     gts_id, content.id
                 ),
             });

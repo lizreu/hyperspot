@@ -7,6 +7,7 @@ use regex::Regex;
 
 /// Error returned by [`expand_env_vars`].
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ExpandVarsError {
     /// An environment variable referenced by the input is missing or contains invalid Unicode.
     Var {

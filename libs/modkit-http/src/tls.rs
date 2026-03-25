@@ -3,6 +3,7 @@
 //! This module provides cached loading of native root certificates to avoid
 //! repeated OS certificate store lookups (which can be slow on some platforms).
 
+use crate::error::TlsConfigError;
 use rustls_pki_types::CertificateDer;
 use std::sync::{Arc, OnceLock};
 
@@ -85,13 +86,13 @@ pub fn get_crypto_provider() -> Arc<rustls::crypto::CryptoProvider> {
 ///
 /// This fail-fast behavior ensures TLS configuration errors are caught at client
 /// construction time rather than failing later during TLS handshakes.
-pub fn native_roots_client_config() -> Result<rustls::ClientConfig, String> {
+pub fn native_roots_client_config() -> Result<rustls::ClientConfig, TlsConfigError> {
     let certs = native_root_certs();
 
     let mut root_store = rustls::RootCertStore::empty();
 
     if certs.is_empty() {
-        return Err("no native root CA certificates found in OS certificate store".to_owned());
+        return Err(TlsConfigError::NoNativeRoots);
     }
 
     let (added, ignored) = root_store.add_parsable_certificates(certs.iter().cloned());
@@ -105,18 +106,17 @@ pub fn native_roots_client_config() -> Result<rustls::ClientConfig, String> {
     }
 
     if added == 0 {
-        return Err(format!(
-            "no valid native root CA certificates parsed (found {}, all {} failed to parse)",
-            certs.len(),
-            ignored
-        ));
+        return Err(TlsConfigError::NoValidNativeRoots {
+            found: certs.len(),
+            parse_failed: ignored,
+        });
     }
 
     let provider = get_crypto_provider();
 
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
-        .map_err(|e| format!("failed to set TLS protocol versions: {e}"))?
+        .map_err(TlsConfigError::ProtocolVersions)?
         .with_root_certificates(root_store)
         .with_no_client_auth();
 

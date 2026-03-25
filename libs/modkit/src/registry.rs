@@ -703,6 +703,7 @@ impl RegistryBuilder {
 
 /// Structured errors for the module registry.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum RegistryError {
     // Phase errors with module context
     #[error("pre-init failed for module '{module}'")]

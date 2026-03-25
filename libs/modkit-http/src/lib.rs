@@ -61,7 +61,7 @@ pub use config::{
     RateLimitConfig, RedirectConfig, RetryConfig, RetryTrigger, TlsRootConfig, TransportSecurity,
     is_idempotent_method,
 };
-pub use error::{HttpError, InvalidUriKind};
+pub use error::{HttpError, InvalidUriKind, TlsConfigError};
 pub use layers::{
     OtelLayer, OtelService, RETRY_ATTEMPT_HEADER, RetryLayer, RetryService, SecureRedirectPolicy,
     UserAgentLayer, UserAgentService,

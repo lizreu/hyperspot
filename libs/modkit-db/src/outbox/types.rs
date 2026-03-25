@@ -74,6 +74,7 @@ pub struct EnqueueMessage<'a> {
 
 /// Errors from the outbox subsystem.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum OutboxError {
     #[error("queue '{0}' is not registered")]
     QueueNotRegistered(String),

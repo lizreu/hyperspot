@@ -90,7 +90,7 @@ pub enum StreamingError {
     ServerEventsParse { detail: String },
 
     /// Underlying byte stream produced an error.
-    #[error("stream error: {0}")]
+    #[error("stream error")]
     Stream(#[from] Box<dyn std::error::Error + Send + Sync>),
 
     /// WebSocket connection to upstream failed.

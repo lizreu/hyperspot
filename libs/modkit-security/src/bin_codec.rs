@@ -5,12 +5,14 @@ use thiserror::Error;
 pub const SECCTX_BIN_VERSION: u8 = 1;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SecCtxEncodeError {
-    #[error("security context serialization failed: {0:?}")]
+    #[error("security context serialization failed")]
     Postcard(#[from] PostcardError),
 }
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SecCtxDecodeError {
     #[error("empty secctx blob")]
     Empty,
@@ -18,7 +20,7 @@ pub enum SecCtxDecodeError {
     #[error("unsupported secctx version: {0}")]
     UnsupportedVersion(u8),
 
-    #[error("security context deserialization failed: {0:?}")]
+    #[error("security context deserialization failed")]
     Postcard(#[from] PostcardError),
 }
 

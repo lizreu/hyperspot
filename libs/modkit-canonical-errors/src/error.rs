@@ -10,7 +10,7 @@ use crate::context::{
 // CanonicalError Enum
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub enum CanonicalError {
     #[non_exhaustive]
@@ -98,7 +98,11 @@ pub enum CanonicalError {
         resource_name: Option<String>,
     },
     #[non_exhaustive]
-    Internal { ctx: Internal, detail: String },
+    Internal {
+        ctx: Internal,
+        detail: String,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
     #[non_exhaustive]
     ServiceUnavailable {
         ctx: ServiceUnavailable,
@@ -268,6 +272,7 @@ impl CanonicalError {
         Self::Internal {
             ctx,
             detail: String::from("An internal error occurred. Please retry later."),
+            source: None,
         }
     }
 
@@ -570,7 +575,16 @@ impl fmt::Display for CanonicalError {
     }
 }
 
-impl std::error::Error for CanonicalError {}
+impl std::error::Error for CanonicalError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Internal { source, .. } => {
+                source.as_ref().map(|e| e.as_ref() as &(dyn std::error::Error + 'static))
+            }
+            _ => None,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // From impls for common library errors (? propagation)
@@ -578,19 +592,34 @@ impl std::error::Error for CanonicalError {}
 
 impl From<std::io::Error> for CanonicalError {
     fn from(err: std::io::Error) -> Self {
-        Self::__internal(Internal::new(err.to_string()))
+        let description = err.to_string();
+        Self::Internal {
+            ctx: Internal::new(description),
+            detail: String::from("An internal error occurred. Please retry later."),
+            source: Some(Box::new(err)),
+        }
     }
 }
 
 impl From<serde_json::Error> for CanonicalError {
     fn from(err: serde_json::Error) -> Self {
-        Self::__internal(Internal::new(err.to_string())).with_detail("Malformed JSON request body")
+        let description = err.to_string();
+        Self::Internal {
+            ctx: Internal::new(description),
+            detail: String::from("Malformed JSON request body"),
+            source: Some(Box::new(err)),
+        }
     }
 }
 
 #[cfg(feature = "sea-orm")]
 impl From<sea_orm::DbErr> for CanonicalError {
     fn from(err: sea_orm::DbErr) -> Self {
-        Self::__internal(Internal::new(err.to_string()))
+        let description = err.to_string();
+        Self::Internal {
+            ctx: Internal::new(description),
+            detail: String::from("An internal error occurred. Please retry later."),
+            source: Some(Box::new(err)),
+        }
     }
 }

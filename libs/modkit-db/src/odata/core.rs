@@ -87,6 +87,7 @@ impl<E: EntityTrait> FieldMap<E> {
 }
 
 #[derive(Debug, Error, Clone)]
+#[non_exhaustive]
 pub enum ODataBuildError {
     #[error("unknown field: {0}")]
     UnknownField(String),
@@ -116,6 +117,13 @@ pub enum ODataBuildError {
     Other(&'static str),
 }
 pub type ODataBuildResult<T> = Result<T, ODataBuildError>;
+
+impl From<ODataBuildError> for ODataError {
+    fn from(e: ODataBuildError) -> Self {
+        // ODataError must remain Clone, so we convert to the string-payload variant.
+        ODataError::InvalidFilter(e.to_string())
+    }
+}
 
 /* ---------- coercion helpers ---------- */
 
@@ -831,10 +839,7 @@ where
 
     // Apply filter
     if let Some(ast) = q.filter.as_deref() {
-        s = s.filter(
-            expr_to_condition::<E>(ast, fmap)
-                .map_err(|e| ODataError::InvalidFilter(e.to_string()))?,
-        );
+        s = s.filter(expr_to_condition::<E>(ast, fmap)?);
     }
 
     // Check if we're paginating backward

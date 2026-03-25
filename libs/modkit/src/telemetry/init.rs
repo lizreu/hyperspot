@@ -306,7 +306,8 @@ pub fn shutdown_metrics() {
 // ===== init_metrics_provider ==================================================
 
 #[cfg(feature = "otel")]
-static METRICS_INIT: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+static METRICS_INIT: std::sync::OnceLock<Result<(), std::sync::Arc<str>>> =
+    std::sync::OnceLock::new();
 
 /// Build a [`SdkMeterProvider`] from the resolved metrics exporter settings and
 /// register it as the global meter provider.
@@ -337,7 +338,10 @@ pub fn init_metrics_provider(otel_cfg: &OpenTelemetryConfig) -> anyhow::Result<(
     }
 
     METRICS_INIT
-        .get_or_init(|| do_init_metrics_provider(otel_cfg).map_err(|e| e.to_string()))
+        .get_or_init(|| {
+            do_init_metrics_provider(otel_cfg)
+                .map_err(|e| std::sync::Arc::<str>::from(e.to_string()))
+        })
         .clone()
         .map_err(|e| anyhow::anyhow!("{e}"))
 }

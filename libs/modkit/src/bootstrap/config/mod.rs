@@ -24,6 +24,7 @@ fn normalize_path(path: &Path) -> String {
 
 /// Error type for vendor configuration access.
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum VendorConfigError {
     #[error("vendor '{vendor}' not found in configuration")]
     NotFound { vendor: String },

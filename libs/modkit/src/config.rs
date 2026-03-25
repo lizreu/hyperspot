@@ -14,6 +14,7 @@ use serde::de::DeserializeOwned;
 
 /// Configuration error for typed config operations
 #[derive(thiserror::Error, Debug)]
+#[non_exhaustive]
 pub enum ConfigError {
     #[error("module '{module}' not found")]
     ModuleNotFound { module: String },

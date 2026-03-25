@@ -8,7 +8,7 @@
 //! and cursor extraction - all using the type-safe `FilterField` approach.
 
 use modkit_db::odata::sea_orm_filter::{
-    FieldToColumn, ODataFieldMapping, filter_node_to_condition,
+    FieldToColumn, FilterConditionError, ODataFieldMapping, filter_node_to_condition,
 };
 use modkit_odata::filter::FilterNode;
 use sea_orm::Condition;
@@ -64,7 +64,9 @@ impl ODataFieldMapping<UserFilterField> for UserODataMapper {
 /// # Returns
 ///
 /// A `SeaORM` Condition that can be applied to a query
-pub fn filter_to_condition(filter: &FilterNode<UserFilterField>) -> Result<Condition, String> {
+pub fn filter_to_condition(
+    filter: &FilterNode<UserFilterField>,
+) -> Result<Condition, FilterConditionError> {
     filter_node_to_condition::<UserFilterField, UserODataMapper>(filter)
 }
 

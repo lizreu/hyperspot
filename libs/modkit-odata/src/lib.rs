@@ -276,6 +276,7 @@ impl std::fmt::Display for ODataOrderBy {
 /// - `InvalidOrderByField` → 422 `gts...~hx.odata.errors.invalid_orderby.v1`
 /// - Cursor errors → 422 `gts...~hx.odata.errors.invalid_cursor.v1`
 #[derive(thiserror::Error, Debug, Clone)]
+#[non_exhaustive]
 pub enum Error {
     // Filter parsing and validation errors
     #[error("invalid $filter: {0}")]
@@ -327,6 +328,13 @@ pub enum Error {
     // Configuration errors
     #[error("OData parsing unavailable: {0}")]
     ParsingUnavailable(&'static str),
+}
+
+impl From<crate::filter::FilterError> for Error {
+    fn from(e: crate::filter::FilterError) -> Self {
+        // Error must remain Clone, so we convert to the string-payload variant.
+        Error::InvalidFilter(e.to_string())
+    }
 }
 
 /// Validate cursor consistency against effective order and filter hash.

@@ -71,7 +71,7 @@ pub enum DomainError {
     ReadyCommitFailed(Vec<ValidationError>),
 
     /// An internal error occurred.
-    #[error("Internal error: {0}")]
+    #[error("Internal error")]
     Internal(#[from] anyhow::Error),
 }
 

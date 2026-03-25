@@ -2,6 +2,7 @@ use thiserror::Error;
 
 /// Errors that can occur during JWT claims validation and processing
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum ClaimsError {
     #[error("Invalid signature or key")]
     InvalidSignature,
@@ -67,7 +68,7 @@ impl From<ClaimsError> for crate::errors::AuthError {
                 crate::errors::AuthError::AudienceMismatch { expected, actual }
             }
             ClaimsError::JwksFetchFailed(msg) => crate::errors::AuthError::JwksFetchFailed(msg),
-            other => crate::errors::AuthError::ValidationFailed(other.to_string()),
+            other => crate::errors::AuthError::Internal(Box::new(other)),
         }
     }
 }

@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum AuthError {
     #[error("Authentication required: missing or invalid token")]
     Unauthenticated,
@@ -29,6 +30,6 @@ pub enum AuthError {
     #[error("Token expired")]
     TokenExpired,
 
-    #[error("Internal error: {0}")]
-    Internal(String),
+    #[error("Internal error")]
+    Internal(#[source] Box<dyn std::error::Error + Send + Sync>),
 }

@@ -51,6 +51,7 @@ use std::task::{Context, Poll};
 /// This enum wraps both fetcher errors and cursor decoding failures,
 /// ensuring that invalid cursors are not silently ignored.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum PagerError<E> {
     /// Error from the fetcher function.
     Fetch(E),

@@ -160,6 +160,7 @@ impl<F: FilterField> FilterNode<F> {
 }
 
 #[derive(Debug, Error, Clone)]
+#[non_exhaustive]
 pub enum FilterError {
     #[error("Unknown field: {0}")]
     UnknownField(String),
@@ -198,7 +199,7 @@ pub type FilterResult<T> = Result<T, FilterError>;
 pub fn parse_odata_filter<F: FilterField>(raw: &str) -> FilterResult<FilterNode<F>> {
     use crate::odata_filters::parse_str;
 
-    let ast = parse_str(raw).map_err(|e| FilterError::InvalidExpression(format!("{e:?}")))?;
+    let ast = parse_str(raw).map_err(|e| FilterError::InvalidExpression(format!("{e}")))?;
     let ast: odata_ast::Expr = ast.into();
     convert_expr_to_filter_node::<F>(&ast)
 }
@@ -409,5 +410,217 @@ fn validate_value_type<F: FilterField>(field: F, value: &odata_ast::Value) -> Fi
             expected: kind,
             got: value.to_string(),
         })
+    }
+}
+
+#[cfg(test)]
+#[cfg_attr(coverage_nightly, coverage(off))]
+mod tests {
+    use super::*;
+
+    // Minimal FilterField implementation for testing.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    enum TestField {
+        Name,
+        Age,
+        Active,
+    }
+
+    impl FilterField for TestField {
+        const FIELDS: &'static [Self] = &[Self::Name, Self::Age, Self::Active];
+
+        fn name(&self) -> &'static str {
+            match self {
+                Self::Name => "name",
+                Self::Age => "age",
+                Self::Active => "active",
+            }
+        }
+
+        fn kind(&self) -> FieldKind {
+            match self {
+                Self::Name => FieldKind::String,
+                Self::Age => FieldKind::I64,
+                Self::Active => FieldKind::Bool,
+            }
+        }
+    }
+
+    // ── FilterError variants via parse_odata_filter ───────────────────────────
+
+    #[test]
+    fn filter_error_unknown_field() {
+        let result = parse_odata_filter::<TestField>("unknown_field eq 'foo'");
+        assert!(
+            matches!(result, Err(FilterError::UnknownField(ref f)) if f == "unknown_field"),
+            "expected UnknownField, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn filter_error_type_mismatch_string_field_with_number() {
+        let result = parse_odata_filter::<TestField>("name eq 42");
+        assert!(
+            matches!(result, Err(FilterError::TypeMismatch { ref field, expected: FieldKind::String, .. }) if field == "name"),
+            "expected TypeMismatch for 'name', got {result:?}"
+        );
+    }
+
+    #[test]
+    fn filter_error_type_mismatch_integer_field_with_string() {
+        let result = parse_odata_filter::<TestField>("age eq 'not_a_number'");
+        assert!(
+            matches!(result, Err(FilterError::TypeMismatch { ref field, expected: FieldKind::I64, .. }) if field == "age"),
+            "expected TypeMismatch for 'age', got {result:?}"
+        );
+    }
+
+    #[test]
+    fn filter_error_unsupported_operation_unknown_function() {
+        let result = parse_odata_filter::<TestField>("unknown_func(name, 'foo')");
+        assert!(
+            matches!(result, Err(FilterError::UnsupportedOperation(_))),
+            "expected UnsupportedOperation, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn filter_error_invalid_expression_bad_syntax() {
+        let result = parse_odata_filter::<TestField>("!!! invalid syntax");
+        assert!(
+            matches!(result, Err(FilterError::InvalidExpression(_))),
+            "expected InvalidExpression, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn filter_error_field_to_field_comparison() {
+        use crate::ast::{CompareOperator, Expr};
+
+        // Build an AST with field-to-field comparison directly (parser may not allow it)
+        let ast = Expr::Compare(
+            Box::new(Expr::Identifier("name".to_owned())),
+            CompareOperator::Eq,
+            Box::new(Expr::Identifier("active".to_owned())),
+        );
+        let result = convert_expr_to_filter_node::<TestField>(&ast);
+        assert!(
+            matches!(result, Err(FilterError::FieldToFieldComparison)),
+            "expected FieldToFieldComparison, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn filter_error_bare_identifier() {
+        use crate::ast::Expr;
+
+        let ast = Expr::Identifier("name".to_owned());
+        let result = convert_expr_to_filter_node::<TestField>(&ast);
+        assert!(
+            matches!(result, Err(FilterError::BareIdentifier(ref s)) if s == "name"),
+            "expected BareIdentifier(name), got {result:?}"
+        );
+    }
+
+    #[test]
+    fn filter_error_bare_literal() {
+        use crate::ast::{Expr, Value};
+
+        let ast = Expr::Value(Value::String("hello".to_owned()));
+        let result = convert_expr_to_filter_node::<TestField>(&ast);
+        assert!(
+            matches!(result, Err(FilterError::BareLiteral)),
+            "expected BareLiteral, got {result:?}"
+        );
+    }
+
+    // ── FilterError Display messages ──────────────────────────────────────────
+
+    #[test]
+    fn filter_error_display_unknown_field() {
+        let err = FilterError::UnknownField("foo".to_owned());
+        assert_eq!(err.to_string(), "Unknown field: foo");
+    }
+
+    #[test]
+    fn filter_error_display_type_mismatch() {
+        let err = FilterError::TypeMismatch {
+            field: "age".to_owned(),
+            expected: FieldKind::I64,
+            got: "'hello'".to_owned(),
+        };
+        assert_eq!(err.to_string(), "Type mismatch for field age: expected I64, got 'hello'");
+    }
+
+    #[test]
+    fn filter_error_display_unsupported_operation() {
+        let err = FilterError::UnsupportedOperation("Function 'random'".to_owned());
+        assert_eq!(err.to_string(), "Unsupported operation: Function 'random'");
+    }
+
+    #[test]
+    fn filter_error_display_field_to_field() {
+        let err = FilterError::FieldToFieldComparison;
+        assert_eq!(err.to_string(), "Field-to-field comparisons are not supported");
+    }
+
+    #[test]
+    fn filter_error_display_bare_identifier() {
+        let err = FilterError::BareIdentifier("name".to_owned());
+        assert_eq!(err.to_string(), "Bare identifier in filter: name");
+    }
+
+    #[test]
+    fn filter_error_display_bare_literal() {
+        let err = FilterError::BareLiteral;
+        assert_eq!(err.to_string(), "Bare literal in filter");
+    }
+
+    // ── Happy-path: parse_odata_filter succeeds ───────────────────────────────
+
+    #[test]
+    fn parse_eq_string_succeeds() {
+        let result = parse_odata_filter::<TestField>("name eq 'alice'");
+        assert!(result.is_ok(), "parse should succeed, got {result:?}");
+        assert!(matches!(
+            result.unwrap(),
+            FilterNode::Binary { op: FilterOp::Eq, .. }
+        ));
+    }
+
+    #[test]
+    fn parse_and_succeeds() {
+        let result = parse_odata_filter::<TestField>("name eq 'alice' and age eq 30");
+        assert!(result.is_ok(), "parse should succeed, got {result:?}");
+        assert!(matches!(
+            result.unwrap(),
+            FilterNode::Composite { op: FilterOp::And, .. }
+        ));
+    }
+
+    #[test]
+    fn parse_contains_string_field_succeeds() {
+        let result = parse_odata_filter::<TestField>("contains(name, 'ali')");
+        assert!(result.is_ok(), "parse should succeed, got {result:?}");
+        assert!(matches!(
+            result.unwrap(),
+            FilterNode::Binary { op: FilterOp::Contains, .. }
+        ));
+    }
+
+    #[test]
+    fn parse_not_succeeds() {
+        let result = parse_odata_filter::<TestField>("not (name eq 'alice')");
+        assert!(result.is_ok(), "parse should succeed, got {result:?}");
+        assert!(matches!(result.unwrap(), FilterNode::Not(_)));
+    }
+
+    // ── FilterError is Clone (required by modkit-odata) ───────────────────────
+
+    #[test]
+    fn filter_error_is_clone() {
+        let err = FilterError::UnknownField("foo".to_owned());
+        let cloned = err.clone();
+        assert_eq!(err.to_string(), cloned.to_string());
     }
 }

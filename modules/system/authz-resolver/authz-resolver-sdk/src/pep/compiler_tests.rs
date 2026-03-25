@@ -505,3 +505,152 @@ fn empty_in_group_subtree_ancestor_ids_fails_constraint() {
         "empty InGroupSubtree ancestor_ids must fail-closed, got: {result:?}"
     );
 }
+
+// === ConstraintError variant coverage (via AllConstraintsFailed) ===
+
+#[test]
+fn constraint_error_unsupported_value_type_null_fails_constraint() {
+    let response = EvaluationResponse {
+        decision: true,
+        context: EvaluationResponseContext {
+            constraints: vec![Constraint {
+                predicates: vec![Predicate::Eq(EqPredicate {
+                    property: pep_properties::OWNER_TENANT_ID.to_owned(),
+                    value: serde_json::Value::Null,
+                })],
+            }],
+            ..Default::default()
+        },
+    };
+
+    let result = compile_to_access_scope(&response, true, DEFAULT_PROPS);
+    assert!(
+        matches!(result, Err(ConstraintCompileError::AllConstraintsFailed { .. })),
+        "expected AllConstraintsFailed for null value, got {result:?}"
+    );
+}
+
+#[test]
+fn constraint_error_non_integer_number_fails_constraint() {
+    let response = EvaluationResponse {
+        decision: true,
+        context: EvaluationResponseContext {
+            constraints: vec![Constraint {
+                predicates: vec![Predicate::Eq(EqPredicate {
+                    property: pep_properties::OWNER_TENANT_ID.to_owned(),
+                    value: serde_json::json!(3.14),
+                })],
+            }],
+            ..Default::default()
+        },
+    };
+
+    let result = compile_to_access_scope(&response, true, DEFAULT_PROPS);
+    assert!(
+        matches!(result, Err(ConstraintCompileError::AllConstraintsFailed { .. })),
+        "expected AllConstraintsFailed for float value, got {result:?}"
+    );
+}
+
+#[test]
+fn constraint_error_unsupported_value_type_array_fails_constraint() {
+    let response = EvaluationResponse {
+        decision: true,
+        context: EvaluationResponseContext {
+            constraints: vec![Constraint {
+                predicates: vec![Predicate::Eq(EqPredicate {
+                    property: pep_properties::OWNER_TENANT_ID.to_owned(),
+                    value: serde_json::json!([T1]),
+                })],
+            }],
+            ..Default::default()
+        },
+    };
+
+    let result = compile_to_access_scope(&response, true, DEFAULT_PROPS);
+    assert!(
+        matches!(result, Err(ConstraintCompileError::AllConstraintsFailed { .. })),
+        "expected AllConstraintsFailed for array value, got {result:?}"
+    );
+}
+
+#[test]
+fn all_constraints_failed_reason_message_is_non_empty() {
+    let response = EvaluationResponse {
+        decision: true,
+        context: EvaluationResponseContext {
+            constraints: vec![Constraint {
+                predicates: vec![Predicate::Eq(EqPredicate {
+                    property: "unsupported_property".to_owned(),
+                    value: jid(T1),
+                })],
+            }],
+            ..Default::default()
+        },
+    };
+
+    let err = compile_to_access_scope(&response, true, DEFAULT_PROPS).unwrap_err();
+    match err {
+        ConstraintCompileError::AllConstraintsFailed { ref reason } => {
+            assert!(!reason.is_empty(), "reason should not be empty");
+            assert!(
+                reason.contains("unsupported property"),
+                "reason should contain the failure detail, got: {reason}"
+            );
+        }
+        other => panic!("expected AllConstraintsFailed, got {other:?}"),
+    }
+}
+
+#[test]
+fn constraint_compile_error_display_messages() {
+    assert_eq!(
+        ConstraintCompileError::ConstraintsRequiredButAbsent.to_string(),
+        "constraints required but PDP returned none (fail-closed)"
+    );
+    let err = ConstraintCompileError::AllConstraintsFailed {
+        reason: "bad".to_owned(),
+    };
+    assert_eq!(
+        err.to_string(),
+        "all constraints failed compilation (fail-closed): bad"
+    );
+}
+
+#[test]
+fn integer_json_number_compiles_to_scope_value_int() {
+    let response = EvaluationResponse {
+        decision: true,
+        context: EvaluationResponseContext {
+            constraints: vec![Constraint {
+                predicates: vec![Predicate::Eq(EqPredicate {
+                    property: pep_properties::OWNER_TENANT_ID.to_owned(),
+                    value: serde_json::json!(42i64),
+                })],
+            }],
+            ..Default::default()
+        },
+    };
+
+    let result = compile_to_access_scope(&response, true, DEFAULT_PROPS);
+    assert!(result.is_ok(), "integer value should compile OK, got {result:?}");
+}
+
+#[test]
+fn boolean_json_value_compiles_ok() {
+    let response = EvaluationResponse {
+        decision: true,
+        context: EvaluationResponseContext {
+            constraints: vec![Constraint {
+                predicates: vec![Predicate::Eq(EqPredicate {
+                    property: pep_properties::OWNER_TENANT_ID.to_owned(),
+                    value: serde_json::json!(true),
+                })],
+            }],
+            ..Default::default()
+        },
+    };
+
+    let result = compile_to_access_scope(&response, true, DEFAULT_PROPS);
+    assert!(result.is_ok(), "boolean value should compile OK, got {result:?}");
+}

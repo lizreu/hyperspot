@@ -4,6 +4,7 @@ use uuid::Uuid;
 /// Error returned when `SecurityContextBuilder::build()` is called without
 /// required fields.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum SecurityContextBuildError {
     #[error(
         "subject_id is required - use SecurityContext::anonymous() for unauthenticated contexts"

@@ -90,6 +90,7 @@ impl fmt::Debug for ScopedKey {
 }
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ClientHubError {
     #[error("client not found: type={type_key:?}")]
     NotFound { type_key: TypeKey },

@@ -72,7 +72,7 @@ impl NodeInfoCollector {
     pub fn collect_syscap(&self, node_id: uuid::Uuid) -> Result<NodeSysCap, NodeInfoError> {
         self.syscap_collector
             .collect(node_id)
-            .map_err(|e| NodeInfoError::SysCapCollectionFailed(e.to_string()))
+            .map_err(|e| NodeInfoError::SysCapCollectionFailed(Box::new(e)))
     }
 
     /// Collect both sysinfo and syscap.

@@ -86,7 +86,7 @@ pub enum LlmProviderError {
     InvalidResponse { detail: String },
 
     /// SSE stream-level error from oagw-sdk.
-    #[error("stream error: {0}")]
+    #[error("stream error")]
     StreamError(#[from] StreamingError),
 }
 
