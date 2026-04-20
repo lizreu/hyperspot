@@ -54,6 +54,7 @@ impl From<modkit::plugins::ChoosePluginError> for DomainError {
             modkit::plugins::ChoosePluginError::PluginNotFound { vendor, .. } => {
                 Self::PluginNotFound { vendor }
             }
+            other => Self::Internal(other.to_string()),
         }
     }
 }

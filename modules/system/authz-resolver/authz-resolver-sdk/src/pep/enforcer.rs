@@ -35,11 +35,16 @@ pub enum EnforcerError {
     },
 
     /// The `AuthZ` evaluation RPC failed.
-    #[error("authorization evaluation failed")]
+    //
+    // `{0}` is included in the Display so callers that stringify the error
+    // (e.g. via `.to_string()` for logging or HTTP body) still see the
+    // underlying cause. The `#[from]` already wires `Error::source()` for
+    // chain walkers.
+    #[error("authorization evaluation failed: {0}")]
     EvaluationFailed(#[from] AuthZResolverError),
 
     /// Constraint compilation failed (missing or unsupported constraints).
-    #[error("constraint compilation failed")]
+    #[error("constraint compilation failed: {0}")]
     CompileFailed(#[from] ConstraintCompileError),
 }
 

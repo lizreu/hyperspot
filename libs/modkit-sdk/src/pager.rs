@@ -33,6 +33,8 @@
 //!         Ok(user) => println!("User: {:?}", user),
 //!         Err(PagerError::Fetch(e)) => eprintln!("Fetch error: {}", e),
 //!         Err(PagerError::InvalidCursor(c)) => eprintln!("Invalid cursor: {}", c),
+//!         // `PagerError` is `#[non_exhaustive]`; cover future variants.
+//!         Err(other) => eprintln!("Pager error: {}", other),
 //!     }
 //! }
 //! ```

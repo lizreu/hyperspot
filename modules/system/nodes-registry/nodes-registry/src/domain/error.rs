@@ -28,17 +28,17 @@ impl From<anyhow::Error> for DomainError {
 
 impl From<modkit_node_info::NodeInfoError> for DomainError {
     fn from(e: modkit_node_info::NodeInfoError) -> Self {
+        use modkit_node_info::NodeInfoError;
         match e {
-            modkit_node_info::NodeInfoError::SysInfoCollectionFailed(msg) => {
-                Self::SysInfoCollectionFailed(msg)
+            NodeInfoError::SysInfoCollectionFailed(msg) => Self::SysInfoCollectionFailed(msg),
+            NodeInfoError::SysCapCollectionFailed(source) => {
+                Self::SysCapCollectionFailed(source.to_string())
             }
-            modkit_node_info::NodeInfoError::SysCapCollectionFailed(msg) => {
-                Self::SysCapCollectionFailed(msg)
-            }
-            modkit_node_info::NodeInfoError::HardwareUuidFailed(msg) => {
+            NodeInfoError::HardwareUuidFailed(msg) => {
                 Self::Internal(format!("Hardware UUID failed: {msg}"))
             }
-            modkit_node_info::NodeInfoError::Internal(msg) => Self::Internal(msg),
+            NodeInfoError::Internal(source) => Self::Internal(source.to_string()),
+            other => Self::Internal(other.to_string()),
         }
     }
 }

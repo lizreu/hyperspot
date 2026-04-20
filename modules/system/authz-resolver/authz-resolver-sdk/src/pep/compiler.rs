@@ -42,6 +42,11 @@ enum ConstraintError {
     UnsupportedValueType { got: String },
     #[error("only integer JSON numbers are supported for scope filters, got: {got}")]
     NonIntegerNumber { got: String },
+    #[error("{predicate} predicate on '{property}' has an empty value list (fail-closed)")]
+    EmptyValueList {
+        predicate: &'static str,
+        property: String,
+    },
 }
 
 /// Error during constraint compilation.
@@ -115,7 +120,7 @@ pub fn compile_to_access_scope(
         return Err(ConstraintCompileError::AllConstraintsFailed {
             reason: fail_reasons
                 .iter()
-                .map(|e| e.to_string())
+                .map(std::string::ToString::to_string)
                 .collect::<Vec<_>>()
                 .join("; "),
         });
@@ -152,10 +157,10 @@ fn compile_constraint(
                     .map(json_to_scope_value)
                     .collect::<Result<_, _>>()?;
                 if values.is_empty() {
-                    return Err(format!(
-                        "In predicate on '{}' has empty value list (fail-closed)",
-                        p.property
-                    ));
+                    return Err(ConstraintError::EmptyValueList {
+                        predicate: "In",
+                        property: p.property.clone(),
+                    });
                 }
                 (p.property.as_str(), ScopeFilter::r#in(&p.property, values))
             }
@@ -166,10 +171,10 @@ fn compile_constraint(
                     .map(json_to_scope_value)
                     .collect::<Result<_, _>>()?;
                 if group_ids.is_empty() {
-                    return Err(format!(
-                        "InGroup predicate on '{}' has empty group_ids (fail-closed)",
-                        p.property
-                    ));
+                    return Err(ConstraintError::EmptyValueList {
+                        predicate: "InGroup",
+                        property: p.property.clone(),
+                    });
                 }
                 (
                     p.property.as_str(),
@@ -183,10 +188,10 @@ fn compile_constraint(
                     .map(json_to_scope_value)
                     .collect::<Result<_, _>>()?;
                 if ancestor_ids.is_empty() {
-                    return Err(format!(
-                        "InGroupSubtree predicate on '{}' has empty ancestor_ids (fail-closed)",
-                        p.property
-                    ));
+                    return Err(ConstraintError::EmptyValueList {
+                        predicate: "InGroupSubtree",
+                        property: p.property.clone(),
+                    });
                 }
                 (
                     p.property.as_str(),

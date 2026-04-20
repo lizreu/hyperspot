@@ -509,8 +509,8 @@ fn build_https_connector(
             Ok(connector)
         }
         TlsRootConfig::Native => {
-            let client_config = tls::native_roots_client_config()
-                .map_err(|e| HttpError::Tls(Box::new(e)))?;
+            let client_config =
+                tls::native_roots_client_config().map_err(|e| HttpError::Tls(Box::new(e)))?;
             let builder = hyper_rustls::HttpsConnectorBuilder::new().with_tls_config(client_config);
             let connector = if allow_http {
                 builder.https_or_http().enable_all_versions().build()

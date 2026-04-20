@@ -97,4 +97,19 @@ impl<E: fmt::Display> fmt::Display for TxError<E> {
     }
 }
 
-impl<E: fmt::Debug + fmt::Display> std::error::Error for TxError<E> {}
+impl<E> std::error::Error for TxError<E>
+where
+    E: std::error::Error + 'static,
+{
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            // Forward to the domain error so that downcasting / source chain
+            // inspection works through the wrapper.
+            TxError::Domain(e) => Some(e),
+            // InfraError already implements `Error::source()` that returns its
+            // boxed cause; exposing the InfraError itself lets callers walk
+            // one more hop to reach the original database error.
+            TxError::Infra(e) => Some(e),
+        }
+    }
+}

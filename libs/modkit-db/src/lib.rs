@@ -243,11 +243,11 @@ pub enum DbError {
 
 impl From<modkit_utils::var_expand::ExpandVarsError> for DbError {
     fn from(err: modkit_utils::var_expand::ExpandVarsError) -> Self {
+        use modkit_utils::var_expand::ExpandVarsError;
         match err {
-            modkit_utils::var_expand::ExpandVarsError::Var { name, source } => {
-                Self::EnvVar { name, source }
-            }
-            modkit_utils::var_expand::ExpandVarsError::Regex(msg) => Self::InvalidParameter(msg),
+            ExpandVarsError::Var { name, source } => Self::EnvVar { name, source },
+            ExpandVarsError::Regex(msg) => Self::InvalidParameter(msg),
+            other => Self::Other(anyhow::Error::new(other)),
         }
     }
 }

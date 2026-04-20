@@ -34,6 +34,7 @@ fn map_scope_error(e: ScopeError) -> DomainError {
         ScopeError::TenantNotInScope { tenant_id } => {
             DomainError::forbidden(format!("tenant {tenant_id} not in scope"))
         }
+        other => DomainError::internal(other.to_string()),
     }
 }
 

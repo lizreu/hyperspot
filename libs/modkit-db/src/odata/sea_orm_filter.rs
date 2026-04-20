@@ -429,27 +429,33 @@ pub fn parse_cursor_value(kind: FieldKind, s: &str) -> Result<sea_orm::Value, Cu
     let result = match kind {
         FieldKind::String => V::String(Some(Box::new(s.to_owned()))),
         FieldKind::I64 => {
-            let i = s
-                .parse::<i64>()
-                .map_err(|e| CursorValueError::Parse { kind, source: Box::new(e) })?;
+            let i = s.parse::<i64>().map_err(|e| CursorValueError::Parse {
+                kind,
+                source: Box::new(e),
+            })?;
             V::BigInt(Some(i))
         }
         FieldKind::F64 => {
-            let f = s
-                .parse::<f64>()
-                .map_err(|e| CursorValueError::Parse { kind, source: Box::new(e) })?;
+            let f = s.parse::<f64>().map_err(|e| CursorValueError::Parse {
+                kind,
+                source: Box::new(e),
+            })?;
             V::Double(Some(f))
         }
         FieldKind::Bool => {
-            let b = s
-                .parse::<bool>()
-                .map_err(|e| CursorValueError::Parse { kind, source: Box::new(e) })?;
+            let b = s.parse::<bool>().map_err(|e| CursorValueError::Parse {
+                kind,
+                source: Box::new(e),
+            })?;
             V::Bool(Some(b))
         }
         FieldKind::Uuid => {
             let u = s
                 .parse::<uuid::Uuid>()
-                .map_err(|e| CursorValueError::Parse { kind, source: Box::new(e) })?;
+                .map_err(|e| CursorValueError::Parse {
+                    kind,
+                    source: Box::new(e),
+                })?;
             V::Uuid(Some(Box::new(u)))
         }
         FieldKind::DateTimeUtc => {
@@ -459,7 +465,10 @@ pub fn parse_cursor_value(kind: FieldKind, s: &str) -> Result<sea_orm::Value, Cu
                 V::TimeDateTimeWithTimeZone(Some(Box::new(dt)))
             } else {
                 let dt = chrono::DateTime::parse_from_rfc3339(s)
-                    .map_err(|e| CursorValueError::Parse { kind, source: Box::new(e) })?
+                    .map_err(|e| CursorValueError::Parse {
+                        kind,
+                        source: Box::new(e),
+                    })?
                     .with_timezone(&chrono::Utc);
                 V::ChronoDateTimeUtc(Some(Box::new(dt)))
             }
@@ -467,19 +476,28 @@ pub fn parse_cursor_value(kind: FieldKind, s: &str) -> Result<sea_orm::Value, Cu
         FieldKind::Date => {
             let d = s
                 .parse::<chrono::NaiveDate>()
-                .map_err(|e| CursorValueError::Parse { kind, source: Box::new(e) })?;
+                .map_err(|e| CursorValueError::Parse {
+                    kind,
+                    source: Box::new(e),
+                })?;
             V::ChronoDate(Some(Box::new(d)))
         }
         FieldKind::Time => {
             let t = s
                 .parse::<chrono::NaiveTime>()
-                .map_err(|e| CursorValueError::Parse { kind, source: Box::new(e) })?;
+                .map_err(|e| CursorValueError::Parse {
+                    kind,
+                    source: Box::new(e),
+                })?;
             V::ChronoTime(Some(Box::new(t)))
         }
         FieldKind::Decimal => {
             let d = s
                 .parse::<rust_decimal::Decimal>()
-                .map_err(|e| CursorValueError::Parse { kind, source: Box::new(e) })?;
+                .map_err(|e| CursorValueError::Parse {
+                    kind,
+                    source: Box::new(e),
+                })?;
             V::Decimal(Some(Box::new(d)))
         }
     };
@@ -814,7 +832,7 @@ mod tests {
     use super::*;
     use bigdecimal::BigDecimal;
     use modkit_odata::filter::{FieldKind, FilterField, FilterNode, FilterOp, ODataValue};
-    use sea_orm::entity::prelude::*;
+    use std::error::Error as _;
 
     // Minimal SeaORM entity for testing FieldToColumn implementations.
     // Only used to satisfy the Column type bounds; no database is needed.
@@ -923,10 +941,10 @@ mod tests {
     fn filter_condition_error_invalid_composite_op_eq() {
         let node = composite(FilterOp::Eq, vec![]);
         let result = run(&node);
-        assert!(
-            matches!(result, Err(FilterConditionError::InvalidCompositeOp { op: FilterOp::Eq })),
-            "expected InvalidCompositeOp(Eq), got {result:?}"
-        );
+        assert!(matches!(
+            result,
+            Err(FilterConditionError::InvalidCompositeOp { op: FilterOp::Eq })
+        ));
     }
 
     #[test]
@@ -940,18 +958,55 @@ mod tests {
     }
 
     #[test]
-    fn filter_condition_error_unexpected_null() {
+    fn filter_condition_eq_null_translates_to_is_null() {
+        // `field eq null` must compile to `field IS NULL` and NOT bubble up
+        // as `UnexpectedNull`. The earlier behaviour was a regression from
+        // the typed-error rewrite (the NULL check was accidentally placed
+        // after the value coercion).
         let node = filter(TestField::Name, FilterOp::Eq, ODataValue::Null);
-        let result = run(&node);
+        let result = run(&node).expect("eq null should produce IS NULL condition");
+        let rendered = format!("{result:?}");
+        assert!(rendered.contains("Is"), "expected an `IS NULL` condition");
         assert!(
-            matches!(result, Err(FilterConditionError::UnexpectedNull)),
-            "expected UnexpectedNull, got {result:?}"
+            rendered.contains("Keyword(Null)"),
+            "expected an `IS NULL` condition"
         );
     }
 
     #[test]
+    fn filter_condition_ne_null_translates_to_is_not_null() {
+        let node = filter(TestField::Name, FilterOp::Ne, ODataValue::Null);
+        let result = run(&node).expect("ne null should produce IS NOT NULL condition");
+        let rendered = format!("{result:?}");
+        assert!(
+            rendered.contains("IsNot"),
+            "expected an `IS NOT NULL` condition"
+        );
+        assert!(
+            rendered.contains("Keyword(Null)"),
+            "expected an `IS NOT NULL` condition"
+        );
+    }
+
+    #[test]
+    fn filter_condition_unsupported_null_op() {
+        // Only `eq` / `ne` are valid NULL operators; everything else must
+        // fail with `UnsupportedNullOp`.
+        let node = filter(TestField::Name, FilterOp::Gt, ODataValue::Null);
+        let result = run(&node);
+        assert!(matches!(
+            result,
+            Err(FilterConditionError::UnsupportedNullOp { op: FilterOp::Gt })
+        ));
+    }
+
+    #[test]
     fn filter_condition_error_logical_in_binary_context_and() {
-        let node = filter(TestField::Name, FilterOp::And, ODataValue::String("x".to_owned()));
+        let node = filter(
+            TestField::Name,
+            FilterOp::And,
+            ODataValue::String("x".to_owned()),
+        );
         let result = run(&node);
         assert!(matches!(
             result,
@@ -961,7 +1016,11 @@ mod tests {
 
     #[test]
     fn filter_condition_error_logical_in_binary_context_or() {
-        let node = filter(TestField::Name, FilterOp::Or, ODataValue::String("x".to_owned()));
+        let node = filter(
+            TestField::Name,
+            FilterOp::Or,
+            ODataValue::String("x".to_owned()),
+        );
         let result = run(&node);
         assert!(matches!(
             result,
@@ -977,15 +1036,19 @@ mod tests {
             ODataValue::Number(BigDecimal::from(42)),
         );
         let result = run(&node);
-        assert!(
-            matches!(result, Err(FilterConditionError::ExpectedString { got: "Number" })),
-            "expected ExpectedString(Number), got {result:?}"
-        );
+        assert!(matches!(
+            result,
+            Err(FilterConditionError::ExpectedString { got: "Number" })
+        ));
     }
 
     #[test]
     fn filter_condition_error_expected_string_on_startswith_with_bool() {
-        let node = filter(TestField::Name, FilterOp::StartsWith, ODataValue::Bool(true));
+        let node = filter(
+            TestField::Name,
+            FilterOp::StartsWith,
+            ODataValue::Bool(true),
+        );
         let result = run(&node);
         assert!(matches!(
             result,
@@ -1006,22 +1069,36 @@ mod tests {
     // Happy-path binary conditions compile without error
     #[test]
     fn filter_condition_eq_string_succeeds() {
-        let node = filter(TestField::Name, FilterOp::Eq, ODataValue::String("alice".to_owned()));
+        let node = filter(
+            TestField::Name,
+            FilterOp::Eq,
+            ODataValue::String("alice".to_owned()),
+        );
         assert!(run(&node).is_ok());
     }
 
     #[test]
     fn filter_condition_contains_string_succeeds() {
-        let node =
-            filter(TestField::Name, FilterOp::Contains, ODataValue::String("ali".to_owned()));
+        let node = filter(
+            TestField::Name,
+            FilterOp::Contains,
+            ODataValue::String("ali".to_owned()),
+        );
         assert!(run(&node).is_ok());
     }
 
     #[test]
     fn filter_condition_and_composite_succeeds() {
-        let left =
-            filter(TestField::Name, FilterOp::Eq, ODataValue::String("alice".to_owned()));
-        let right = filter(TestField::Count, FilterOp::Gt, ODataValue::Number(BigDecimal::from(0)));
+        let left = filter(
+            TestField::Name,
+            FilterOp::Eq,
+            ODataValue::String("alice".to_owned()),
+        );
+        let right = filter(
+            TestField::Count,
+            FilterOp::Gt,
+            ODataValue::Number(BigDecimal::from(0)),
+        );
         let node = composite(FilterOp::And, vec![left, right]);
         assert!(run(&node).is_ok());
     }
@@ -1089,7 +1166,12 @@ mod tests {
         let v = sea_orm::Value::String(Some(Box::new("hello".to_owned())));
         let result = encode_cursor_value(&v, FieldKind::I64);
         assert!(
-            matches!(result, Err(CursorValueError::TypeMismatch { kind: FieldKind::I64 })),
+            matches!(
+                result,
+                Err(CursorValueError::TypeMismatch {
+                    kind: FieldKind::I64
+                })
+            ),
             "expected TypeMismatch(I64), got {result:?}"
         );
     }
@@ -1100,7 +1182,9 @@ mod tests {
         let result = encode_cursor_value(&v, FieldKind::String);
         assert!(matches!(
             result,
-            Err(CursorValueError::TypeMismatch { kind: FieldKind::String })
+            Err(CursorValueError::TypeMismatch {
+                kind: FieldKind::String
+            })
         ));
     }
 
@@ -1110,7 +1194,9 @@ mod tests {
         let result = encode_cursor_value(&v, FieldKind::Uuid);
         assert!(matches!(
             result,
-            Err(CursorValueError::TypeMismatch { kind: FieldKind::Uuid })
+            Err(CursorValueError::TypeMismatch {
+                kind: FieldKind::Uuid
+            })
         ));
     }
 
@@ -1150,13 +1236,20 @@ mod tests {
     fn parse_cursor_value_i64_parse_error() {
         let result = parse_cursor_value(FieldKind::I64, "not_a_number");
         assert!(
-            matches!(result, Err(CursorValueError::Parse { kind: FieldKind::I64, .. })),
+            matches!(
+                result,
+                Err(CursorValueError::Parse {
+                    kind: FieldKind::I64,
+                    ..
+                })
+            ),
             "expected Parse(I64), got {result:?}"
         );
-        // Verify error chain is preserved
-        use std::error::Error;
         let err = result.unwrap_err();
-        assert!(err.source().is_some(), "Parse error should expose its source");
+        assert!(
+            err.source().is_some(),
+            "Parse error should expose its source"
+        );
     }
 
     #[test]
@@ -1164,7 +1257,10 @@ mod tests {
         let result = parse_cursor_value(FieldKind::F64, "not_a_float");
         assert!(matches!(
             result,
-            Err(CursorValueError::Parse { kind: FieldKind::F64, .. })
+            Err(CursorValueError::Parse {
+                kind: FieldKind::F64,
+                ..
+            })
         ));
     }
 
@@ -1173,7 +1269,10 @@ mod tests {
         let result = parse_cursor_value(FieldKind::Bool, "maybe");
         assert!(matches!(
             result,
-            Err(CursorValueError::Parse { kind: FieldKind::Bool, .. })
+            Err(CursorValueError::Parse {
+                kind: FieldKind::Bool,
+                ..
+            })
         ));
     }
 
@@ -1182,7 +1281,10 @@ mod tests {
         let result = parse_cursor_value(FieldKind::Uuid, "not-a-uuid");
         assert!(matches!(
             result,
-            Err(CursorValueError::Parse { kind: FieldKind::Uuid, .. })
+            Err(CursorValueError::Parse {
+                kind: FieldKind::Uuid,
+                ..
+            })
         ));
     }
 
@@ -1191,7 +1293,10 @@ mod tests {
         let result = parse_cursor_value(FieldKind::DateTimeUtc, "not-a-datetime");
         assert!(matches!(
             result,
-            Err(CursorValueError::Parse { kind: FieldKind::DateTimeUtc, .. })
+            Err(CursorValueError::Parse {
+                kind: FieldKind::DateTimeUtc,
+                ..
+            })
         ));
     }
 
@@ -1200,7 +1305,10 @@ mod tests {
         let result = parse_cursor_value(FieldKind::Date, "not-a-date");
         assert!(matches!(
             result,
-            Err(CursorValueError::Parse { kind: FieldKind::Date, .. })
+            Err(CursorValueError::Parse {
+                kind: FieldKind::Date,
+                ..
+            })
         ));
     }
 
@@ -1209,7 +1317,10 @@ mod tests {
         let result = parse_cursor_value(FieldKind::Time, "not-a-time");
         assert!(matches!(
             result,
-            Err(CursorValueError::Parse { kind: FieldKind::Time, .. })
+            Err(CursorValueError::Parse {
+                kind: FieldKind::Time,
+                ..
+            })
         ));
     }
 
@@ -1218,29 +1329,38 @@ mod tests {
         let result = parse_cursor_value(FieldKind::Decimal, "not-a-decimal");
         assert!(matches!(
             result,
-            Err(CursorValueError::Parse { kind: FieldKind::Decimal, .. })
+            Err(CursorValueError::Parse {
+                kind: FieldKind::Decimal,
+                ..
+            })
         ));
     }
 
     // CursorValueError Display messages
     #[test]
     fn cursor_value_error_unknown_orderby_field_display() {
-        let err = CursorValueError::UnknownOrderByField { name: "foo".to_owned() };
+        let err = CursorValueError::UnknownOrderByField {
+            name: "foo".to_owned(),
+        };
         assert_eq!(err.to_string(), "unknown orderby field: foo");
     }
 
     #[test]
     fn cursor_value_error_type_mismatch_display() {
-        let err = CursorValueError::TypeMismatch { kind: FieldKind::I64 };
+        let err = CursorValueError::TypeMismatch {
+            kind: FieldKind::I64,
+        };
         assert_eq!(err.to_string(), "cursor type mismatch for I64");
     }
 
     // parse_cursor_value / encode_cursor_value round-trip
     #[test]
     fn cursor_value_round_trip_string() {
-        let encoded =
-            encode_cursor_value(&sea_orm::Value::String(Some(Box::new("world".to_owned()))), FieldKind::String)
-                .unwrap();
+        let encoded = encode_cursor_value(
+            &sea_orm::Value::String(Some(Box::new("world".to_owned()))),
+            FieldKind::String,
+        )
+        .unwrap();
         let decoded = parse_cursor_value(FieldKind::String, &encoded).unwrap();
         assert!(matches!(decoded, sea_orm::Value::String(Some(s)) if *s == "world"));
     }

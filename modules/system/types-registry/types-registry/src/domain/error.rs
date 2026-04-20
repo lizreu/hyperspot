@@ -45,6 +45,7 @@ impl std::fmt::Display for ValidationError {
 /// Domain-level errors for the Types Registry module.
 #[domain_model]
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum DomainError {
     /// The GTS ID format is invalid.
     #[error("Invalid GTS ID: {0}")]

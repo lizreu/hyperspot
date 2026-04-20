@@ -7,7 +7,7 @@
 //! This module provides the complete `OData` mapping including filtering, ordering,
 //! and cursor extraction - all using the type-safe `FilterField` approach.
 
-use modkit_db::odata::sea_orm_filter::{
+use modkit_db::odata::{
     FieldToColumn, FilterConditionError, ODataFieldMapping, filter_node_to_condition,
 };
 use modkit_odata::filter::FilterNode;

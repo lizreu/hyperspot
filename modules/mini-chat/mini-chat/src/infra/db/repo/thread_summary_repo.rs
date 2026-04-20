@@ -70,18 +70,11 @@ impl crate::domain::repos::ThreadSummaryRepository for ThreadSummaryRepository {
 
                 match secure_insert::<Entity>(am, &scope, runner).await {
                     Ok(_) => Ok(1),
-                    Err(e) => {
-                        let msg = e.to_string();
-                        if msg.contains("UNIQUE")
-                            || msg.contains("unique")
-                            || msg.contains("duplicate")
-                        {
-                            // Another handler already inserted — CAS lost.
-                            Ok(0)
-                        } else {
-                            Err(DomainError::internal(format!("thread_summary insert: {e}")))
-                        }
+                    Err(e) if e.is_unique_violation() => {
+                        // Another handler already inserted — CAS lost.
+                        Ok(0)
                     }
+                    Err(e) => Err(DomainError::internal(format!("thread_summary insert: {e}"))),
                 }
             }
             Some(base) => {

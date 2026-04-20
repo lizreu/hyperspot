@@ -525,7 +525,10 @@ fn constraint_error_unsupported_value_type_null_fails_constraint() {
 
     let result = compile_to_access_scope(&response, true, DEFAULT_PROPS);
     assert!(
-        matches!(result, Err(ConstraintCompileError::AllConstraintsFailed { .. })),
+        matches!(
+            result,
+            Err(ConstraintCompileError::AllConstraintsFailed { .. })
+        ),
         "expected AllConstraintsFailed for null value, got {result:?}"
     );
 }
@@ -538,7 +541,7 @@ fn constraint_error_non_integer_number_fails_constraint() {
             constraints: vec![Constraint {
                 predicates: vec![Predicate::Eq(EqPredicate {
                     property: pep_properties::OWNER_TENANT_ID.to_owned(),
-                    value: serde_json::json!(3.14),
+                    value: serde_json::json!(2.5_f64),
                 })],
             }],
             ..Default::default()
@@ -547,7 +550,10 @@ fn constraint_error_non_integer_number_fails_constraint() {
 
     let result = compile_to_access_scope(&response, true, DEFAULT_PROPS);
     assert!(
-        matches!(result, Err(ConstraintCompileError::AllConstraintsFailed { .. })),
+        matches!(
+            result,
+            Err(ConstraintCompileError::AllConstraintsFailed { .. })
+        ),
         "expected AllConstraintsFailed for float value, got {result:?}"
     );
 }
@@ -569,7 +575,10 @@ fn constraint_error_unsupported_value_type_array_fails_constraint() {
 
     let result = compile_to_access_scope(&response, true, DEFAULT_PROPS);
     assert!(
-        matches!(result, Err(ConstraintCompileError::AllConstraintsFailed { .. })),
+        matches!(
+            result,
+            Err(ConstraintCompileError::AllConstraintsFailed { .. })
+        ),
         "expected AllConstraintsFailed for array value, got {result:?}"
     );
 }
@@ -598,7 +607,9 @@ fn all_constraints_failed_reason_message_is_non_empty() {
                 "reason should contain the failure detail, got: {reason}"
             );
         }
-        other => panic!("expected AllConstraintsFailed, got {other:?}"),
+        other @ ConstraintCompileError::ConstraintsRequiredButAbsent => {
+            panic!("expected AllConstraintsFailed, got {other:?}")
+        }
     }
 }
 
@@ -633,7 +644,10 @@ fn integer_json_number_compiles_to_scope_value_int() {
     };
 
     let result = compile_to_access_scope(&response, true, DEFAULT_PROPS);
-    assert!(result.is_ok(), "integer value should compile OK, got {result:?}");
+    assert!(
+        result.is_ok(),
+        "integer value should compile OK, got {result:?}"
+    );
 }
 
 #[test]
@@ -652,5 +666,8 @@ fn boolean_json_value_compiles_ok() {
     };
 
     let result = compile_to_access_scope(&response, true, DEFAULT_PROPS);
-    assert!(result.is_ok(), "boolean value should compile OK, got {result:?}");
+    assert!(
+        result.is_ok(),
+        "boolean value should compile OK, got {result:?}"
+    );
 }

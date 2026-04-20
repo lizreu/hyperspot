@@ -182,6 +182,10 @@ impl From<ScopeError> for DomainError {
                 tracing::error!("invalid scope: {msg}");
                 DomainError::internal(msg)
             }
+            ref other => {
+                tracing::error!(error = %other, "unexpected scope error");
+                DomainError::internal(other.to_string())
+            }
         }
     }
 }

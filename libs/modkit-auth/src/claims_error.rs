@@ -50,25 +50,54 @@ pub enum ClaimsError {
     UnknownKeyId(String),
 }
 
-// Conversion from ClaimsError to AuthError for backward compatibility
+// Conversion from ClaimsError to AuthError for backward compatibility.
+//
+// Every known `ClaimsError` variant maps to a specific `AuthError` variant so
+// that authentication failures produced by the JWT pipeline surface with the
+// correct HTTP semantics (typically 401) instead of being funneled into the
+// generic `Internal` (500) fault.
+//
+// Note: the match is intentionally exhaustive with no wildcard arm. Because
+// `ClaimsError` and this impl live in the same crate, `#[non_exhaustive]` does
+// not force a fallback here; adding a new variant will be a compile error,
+// which is exactly what we want - every new variant must be explicitly mapped
+// to the most appropriate `AuthError`.
 impl From<ClaimsError> for crate::errors::AuthError {
     fn from(err: ClaimsError) -> Self {
+        use crate::errors::AuthError;
         match err {
-            ClaimsError::Expired => crate::errors::AuthError::TokenExpired,
-            ClaimsError::InvalidSignature => {
-                crate::errors::AuthError::InvalidToken("Invalid signature".into())
-            }
-            ClaimsError::InvalidIssuer { expected, actual } => {
-                crate::errors::AuthError::IssuerMismatch {
-                    expected: expected.join(", "),
-                    actual,
-                }
-            }
+            ClaimsError::Expired => AuthError::TokenExpired,
+            ClaimsError::InvalidSignature => AuthError::InvalidToken("Invalid signature".into()),
+            ClaimsError::InvalidIssuer { expected, actual } => AuthError::IssuerMismatch {
+                expected: expected.join(", "),
+                actual,
+            },
             ClaimsError::InvalidAudience { expected, actual } => {
-                crate::errors::AuthError::AudienceMismatch { expected, actual }
+                AuthError::AudienceMismatch { expected, actual }
             }
-            ClaimsError::JwksFetchFailed(msg) => crate::errors::AuthError::JwksFetchFailed(msg),
-            other => crate::errors::AuthError::Internal(Box::new(other)),
+            ClaimsError::NotYetValid => {
+                AuthError::ValidationFailed("token not yet valid (nbf check failed)".into())
+            }
+            ClaimsError::Malformed(msg) => AuthError::InvalidToken(format!("malformed: {msg}")),
+            ClaimsError::Provider(msg) => {
+                AuthError::ValidationFailed(format!("provider error: {msg}"))
+            }
+            ClaimsError::MissingClaim(name) => {
+                AuthError::ValidationFailed(format!("missing required claim: {name}"))
+            }
+            ClaimsError::InvalidClaimFormat { field, reason } => {
+                AuthError::ValidationFailed(format!("invalid claim format: {field} - {reason}"))
+            }
+            ClaimsError::UnknownKidAfterRefresh => {
+                AuthError::ValidationFailed("unknown key ID after refresh".into())
+            }
+            ClaimsError::DecodeFailed(msg) => {
+                AuthError::InvalidToken(format!("decode failed: {msg}"))
+            }
+            ClaimsError::JwksFetchFailed(msg) => AuthError::JwksFetchFailed(msg),
+            ClaimsError::UnknownKeyId(kid) => {
+                AuthError::ValidationFailed(format!("unknown key ID: {kid}"))
+            }
         }
     }
 }

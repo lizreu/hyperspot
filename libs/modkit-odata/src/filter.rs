@@ -549,7 +549,10 @@ mod tests {
             expected: FieldKind::I64,
             got: "'hello'".to_owned(),
         };
-        assert_eq!(err.to_string(), "Type mismatch for field age: expected I64, got 'hello'");
+        assert_eq!(
+            err.to_string(),
+            "Type mismatch for field age: expected I64, got 'hello'"
+        );
     }
 
     #[test]
@@ -561,7 +564,10 @@ mod tests {
     #[test]
     fn filter_error_display_field_to_field() {
         let err = FilterError::FieldToFieldComparison;
-        assert_eq!(err.to_string(), "Field-to-field comparisons are not supported");
+        assert_eq!(
+            err.to_string(),
+            "Field-to-field comparisons are not supported"
+        );
     }
 
     #[test]
@@ -584,7 +590,10 @@ mod tests {
         assert!(result.is_ok(), "parse should succeed, got {result:?}");
         assert!(matches!(
             result.unwrap(),
-            FilterNode::Binary { op: FilterOp::Eq, .. }
+            FilterNode::Binary {
+                op: FilterOp::Eq,
+                ..
+            }
         ));
     }
 
@@ -594,7 +603,10 @@ mod tests {
         assert!(result.is_ok(), "parse should succeed, got {result:?}");
         assert!(matches!(
             result.unwrap(),
-            FilterNode::Composite { op: FilterOp::And, .. }
+            FilterNode::Composite {
+                op: FilterOp::And,
+                ..
+            }
         ));
     }
 
@@ -604,7 +616,10 @@ mod tests {
         assert!(result.is_ok(), "parse should succeed, got {result:?}");
         assert!(matches!(
             result.unwrap(),
-            FilterNode::Binary { op: FilterOp::Contains, .. }
+            FilterNode::Binary {
+                op: FilterOp::Contains,
+                ..
+            }
         ));
     }
 

@@ -578,9 +578,9 @@ impl fmt::Display for CanonicalError {
 impl std::error::Error for CanonicalError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Internal { source, .. } => {
-                source.as_ref().map(|e| e.as_ref() as &(dyn std::error::Error + 'static))
-            }
+            Self::Internal { source, .. } => source
+                .as_ref()
+                .map(|e| e.as_ref() as &(dyn std::error::Error + 'static)),
             _ => None,
         }
     }
