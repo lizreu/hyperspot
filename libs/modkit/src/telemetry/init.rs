@@ -7,7 +7,6 @@
 use anyhow::Context;
 #[cfg(feature = "otel")]
 use opentelemetry::{KeyValue, global, trace::TracerProvider as _};
-use std::sync::Once;
 
 #[cfg(feature = "otel")]
 use opentelemetry_otlp::{Protocol, WithExportConfig};
@@ -130,7 +129,12 @@ fn build_grpc_exporter(
     b.build().context("build OTLP gRPC exporter")
 }
 
-static INIT_TRACING: Once = Once::new();
+#[cfg(feature = "otel")]
+static TRACER_PROVIDER: std::sync::OnceLock<SdkTracerProvider> = std::sync::OnceLock::new();
+
+#[cfg(feature = "otel")]
+static METER_PROVIDER: std::sync::OnceLock<opentelemetry_sdk::metrics::SdkMeterProvider> =
+    std::sync::OnceLock::new();
 
 /// Initialize OpenTelemetry tracing from configuration and return a layer
 /// to be attached to `tracing_subscriber`.
@@ -181,10 +185,19 @@ pub fn init_tracing(
     let tracer = provider.tracer(service_name);
     let otel_layer = tracing_opentelemetry::OpenTelemetryLayer::new(tracer);
 
-    // Make it global
-    INIT_TRACING.call_once(|| {
-        global::set_tracer_provider(provider);
-    });
+    // `OnceLock::set` is the atomic singleton guard. If another thread won the
+    // race we must not return a layer backed by an untracked provider — that
+    // provider would never be flushed at shutdown. Shut it down and surface
+    // the error to the caller instead.
+    if let Err(unused_provider) = TRACER_PROVIDER.set(provider.clone()) {
+        if let Err(e) = unused_provider.shutdown() {
+            tracing::warn!(error = %e, "shutdown of duplicate provider failed");
+        }
+        return Err(anyhow::anyhow!(
+            "OpenTelemetry tracing is already initialized"
+        ));
+    }
+    global::set_tracer_provider(provider);
 
     tracing::info!("OpenTelemetry layer created successfully");
     Ok(otel_layer)
@@ -276,12 +289,24 @@ pub(crate) fn build_metadata_from_cfg_and_env(
 // ===== shutdown_tracing =======================================================
 
 /// Gracefully shut down OpenTelemetry tracing.
-/// In opentelemetry 0.31 there is no global `shutdown_tracer_provider()`.
-/// Keep a handle to `SdkTracerProvider` in your app state and call `shutdown()`
-/// during graceful shutdown. This function remains a no-op for compatibility.
+///
+/// Force-flushes and shuts down the globally-installed [`SdkTracerProvider`]
+/// captured during [`init_tracing`]. Safe to call even when tracing was never
+/// initialized: in that case this is a no-op.
 #[cfg(feature = "otel")]
 pub fn shutdown_tracing() {
-    tracing::info!("Tracing shutdown: no-op (keep a provider handle to call `shutdown()`).");
+    if let Some(provider) = TRACER_PROVIDER.get() {
+        if let Err(e) = provider.force_flush() {
+            tracing::warn!(error = %e, "OTEL tracer force_flush failed during shutdown");
+        }
+        if let Err(e) = provider.shutdown() {
+            tracing::warn!(error = %e, "OTEL tracer provider shutdown failed");
+        } else {
+            tracing::info!("OTEL tracer provider shut down cleanly");
+        }
+    } else {
+        tracing::debug!("shutdown_tracing: provider was never initialized");
+    }
 }
 
 #[cfg(not(feature = "otel"))]
@@ -290,12 +315,25 @@ pub fn shutdown_tracing() {
 }
 
 /// Gracefully shut down OpenTelemetry metrics.
-/// In opentelemetry 0.31 there is no global `shutdown_meter_provider()`.
-/// Keep a handle to `SdkMeterProvider` in your app state and call `shutdown()`
-/// during graceful shutdown. This function remains a no-op for compatibility.
+///
+/// Force-flushes and shuts down the globally-installed
+/// [`opentelemetry_sdk::metrics::SdkMeterProvider`] captured during
+/// [`init_metrics_provider`]. Safe to call even when metrics were never
+/// initialized: in that case this is a no-op.
 #[cfg(feature = "otel")]
 pub fn shutdown_metrics() {
-    tracing::info!("Metrics shutdown: no-op (keep a provider handle to call `shutdown()`).");
+    if let Some(provider) = METER_PROVIDER.get() {
+        if let Err(e) = provider.force_flush() {
+            tracing::warn!(error = %e, "OTEL meter force_flush failed during shutdown");
+        }
+        if let Err(e) = provider.shutdown() {
+            tracing::warn!(error = %e, "OTEL meter provider shutdown failed");
+        } else {
+            tracing::info!("OTEL meter provider shut down cleanly");
+        }
+    } else {
+        tracing::debug!("shutdown_metrics: provider was never initialized");
+    }
 }
 
 #[cfg(not(feature = "otel"))]
@@ -306,7 +344,8 @@ pub fn shutdown_metrics() {
 // ===== init_metrics_provider ==================================================
 
 #[cfg(feature = "otel")]
-static METRICS_INIT: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+static METRICS_INIT: std::sync::OnceLock<Result<(), std::sync::Arc<str>>> =
+    std::sync::OnceLock::new();
 
 /// Build a [`SdkMeterProvider`] from the resolved metrics exporter settings and
 /// register it as the global meter provider.
@@ -337,7 +376,10 @@ pub fn init_metrics_provider(otel_cfg: &OpenTelemetryConfig) -> anyhow::Result<(
     }
 
     METRICS_INIT
-        .get_or_init(|| do_init_metrics_provider(otel_cfg).map_err(|e| e.to_string()))
+        .get_or_init(|| {
+            do_init_metrics_provider(otel_cfg)
+                .map_err(|e| std::sync::Arc::<str>::from(e.to_string()))
+        })
         .clone()
         .map_err(|e| anyhow::anyhow!("{e}"))
 }
@@ -394,6 +436,11 @@ fn do_init_metrics_provider(otel_cfg: &OpenTelemetryConfig) -> anyhow::Result<()
 
     let provider = builder.build();
 
+    // `set` only fails on a second initialization, which `METRICS_INIT` already
+    // guards against; swallowing the error is safe.
+    if METER_PROVIDER.set(provider.clone()).is_err() {
+        tracing::debug!("METER_PROVIDER OnceLock was already set");
+    }
     global::set_meter_provider(provider);
     tracing::info!("OpenTelemetry metrics initialized successfully");
 
@@ -519,6 +566,24 @@ mod tests {
         assert!(result.is_err());
     }
 
+    /// Accept either a fresh successful init or the singleton-guard "already
+    /// initialized" error. `init_tracing` stores its provider in a
+    /// process-global `OnceLock`; only the first call in any test binary
+    /// actually builds a provider, while later calls deliberately return Err.
+    /// The point of the per-config tests is that the configuration itself is
+    /// accepted by the builder, not that the provider re-initializes.
+    #[cfg(feature = "otel")]
+    fn assert_init_accepts_config<T>(result: anyhow::Result<T>, ctx: &str) {
+        if let Err(e) = result {
+            let msg = e.to_string();
+            assert!(
+                msg.contains("already initialized"),
+                "{ctx}: init_tracing should succeed or report \
+                 already-initialized; got: {msg}"
+            );
+        }
+    }
+
     #[tokio::test]
     #[cfg(feature = "otel")]
     async fn test_init_tracing_enabled() {
@@ -528,7 +593,7 @@ mod tests {
         });
 
         let result = init_tracing(&otel);
-        assert!(result.is_ok());
+        assert_init_accepts_config(result, "enabled");
     }
 
     #[test]
@@ -554,7 +619,7 @@ mod tests {
         };
 
         let result = init_tracing(&otel);
-        assert!(result.is_ok());
+        assert_init_accepts_config(result, "resource_attributes");
     }
 
     #[test]
@@ -570,7 +635,7 @@ mod tests {
         });
 
         let result = init_tracing(&otel);
-        assert!(result.is_ok());
+        assert_init_accepts_config(result, "always_on_sampler");
     }
 
     #[test]
@@ -586,7 +651,7 @@ mod tests {
         });
 
         let result = init_tracing(&otel);
-        assert!(result.is_ok());
+        assert_init_accepts_config(result, "always_off_sampler");
     }
 
     #[test]
@@ -602,7 +667,7 @@ mod tests {
         });
 
         let result = init_tracing(&otel);
-        assert!(result.is_ok());
+        assert_init_accepts_config(result, "ratio_sampler");
     }
 
     #[test]
@@ -622,7 +687,7 @@ mod tests {
         });
 
         let result = init_tracing(&otel);
-        assert!(result.is_ok());
+        assert_init_accepts_config(result, "http_exporter");
     }
 
     #[test]
@@ -643,7 +708,7 @@ mod tests {
         });
 
         let result = init_tracing(&otel);
-        assert!(result.is_ok());
+        assert_init_accepts_config(result, "grpc_exporter");
     }
 
     #[test]

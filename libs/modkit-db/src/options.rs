@@ -85,6 +85,9 @@ impl DbConnectOptions {
 
                 let sqlx_pool = pool_opts.connect_with(opts.clone()).await?;
 
+                // TODO(tracing follow-up): switch to `sea_orm::Database::connect(ConnectOptions)` to enable
+                // SeaORM's built-in sqlx_logging for DB statement tracing. Current path takes a
+                // pre-built sqlx pool which bypasses SeaORM's ConnectOptions.
                 let sea = sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(sqlx_pool);
 
                 let filename = opts.get_filename().display().to_string();
@@ -102,6 +105,9 @@ impl DbConnectOptions {
 
                 let sqlx_pool = pool_opts.connect_with(opts.clone()).await?;
 
+                // TODO(tracing follow-up): switch to `sea_orm::Database::connect(ConnectOptions)` to enable
+                // SeaORM's built-in sqlx_logging for DB statement tracing. Current path takes a
+                // pre-built sqlx pool which bypasses SeaORM's ConnectOptions.
                 let sea = sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(sqlx_pool);
 
                 let handle = DbHandle {
@@ -123,6 +129,9 @@ impl DbConnectOptions {
 
                 let sqlx_pool = pool_opts.connect_with(opts.clone()).await?;
 
+                // TODO(tracing follow-up): switch to `sea_orm::Database::connect(ConnectOptions)` to enable
+                // SeaORM's built-in sqlx_logging for DB statement tracing. Current path takes a
+                // pre-built sqlx pool which bypasses SeaORM's ConnectOptions.
                 let sea = sea_orm::SqlxMySqlConnector::from_sqlx_mysql_pool(sqlx_pool);
 
                 let handle = DbHandle {

@@ -2,19 +2,15 @@
 //!
 //! This module provides helper traits and functions to automatically enrich
 //! `Problem` with trace context:
-//! - `trace_id`: extracted from the current tracing span
-//! - `instance`: extracted from the request URI
+//! - `trace_id`: real W3C trace ID of the active OpenTelemetry span context,
+//!   via `modkit::telemetry::current_trace_id()`. May be `None` when OTEL is
+//!   disabled or no span context is active — in that case the field is left
+//!   unset on the response rather than populated with a placeholder.
+//! - `instance`: extracted from the request URI.
 //!
 //! This eliminates per-callsite boilerplate and ensures consistent error reporting.
 
 use crate::api::problem::Problem;
-
-/// Extract `trace_id` from the current tracing span
-fn extract_trace_id() -> Option<String> {
-    // Try to extract from the current span's trace_id field
-    // This requires coordination with the tracing subscriber
-    tracing::Span::current().id().map(|id| format!("{id:?}"))
-}
 
 /// Helper trait for enriching Problem with trace context
 pub trait WithTraceContext {
@@ -26,7 +22,7 @@ pub trait WithTraceContext {
 impl WithTraceContext for Problem {
     fn with_trace_context(mut self, instance: impl Into<String>) -> Self {
         self = self.with_instance(instance);
-        if let Some(tid) = extract_trace_id() {
+        if let Some(tid) = crate::telemetry::current_trace_id() {
             self = self.with_trace_id(tid);
         }
         self

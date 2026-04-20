@@ -5,9 +5,7 @@ use crate::errors::ErrorCode;
 
 /// Map domain error to RFC9457 Problem using the GTS error catalog
 pub fn domain_error_to_problem(e: &DomainError, instance: &str) -> Problem {
-    let trace_id = tracing::Span::current()
-        .id()
-        .map(|id| id.into_u64().to_string());
+    let trace_id = modkit::telemetry::current_trace_id();
 
     match e {
         DomainError::NotFound => build_not_found_problem(instance, trace_id),

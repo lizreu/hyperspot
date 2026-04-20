@@ -4,9 +4,7 @@ use modkit::api::problem::Problem;
 
 /// Map domain errors to HTTP problem responses
 pub fn domain_error_to_problem(err: DomainError, instance: &str) -> Problem {
-    let trace_id = tracing::Span::current()
-        .id()
-        .map(|id| id.into_u64().to_string());
+    let trace_id = modkit::telemetry::current_trace_id();
 
     let mut problem = match err {
         DomainError::NodeNotFound(id) => Problem::new(

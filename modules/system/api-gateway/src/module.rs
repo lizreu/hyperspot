@@ -366,7 +366,15 @@ impl ApiGateway {
         // 3.5) Structured access log (runs after push_req_id populates XRequestId extension)
         router = router.layer(from_fn(middleware::access_log::access_log_middleware));
 
-        // 3) Record request_id into span + extensions (requires span to exist first => must be inner to Trace)
+        // 3) Handler span (child of TraceLayer's http_request; parent of biz middlewares).
+        // Records http.route from Axum's MatchedPath; falls back to the raw path
+        // when MatchedPath is absent (e.g. 404s that never reach a route).
+        // Must be INSIDE push_req_id_to_extensions so the latter records request_id
+        // onto the http_request span, not onto handler.
+        router = router.layer(from_fn(modkit::api::handler_span_middleware));
+
+        // 2.5) Record request_id into the http_request span + extensions.
+        // Must be OUTSIDE handler_span so Span::current() resolves to http_request.
         router = router.layer(from_fn(middleware::request_id::push_req_id_to_extensions));
 
         // 2) Trace (outer to push_req_id_to_extensions)
@@ -384,19 +392,24 @@ impl ApiGateway {
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("n/a");
 
+                    // Legacy fields (`method`, `uri`, `status`) are kept for
+                    // log-based dashboards that already key on them. OTEL
+                    // semantic-convention fields (`http.method`, `http.target`,
+                    // `http.status_code`, …) are recorded alongside for new
+                    // consumers. See `docs/TRACING_SETUP.md` §Field naming.
                     let span = tracing::info_span!(
                         "http_request",
                         method = %req.method(),
                         uri = %req.uri().path(),
                         version = ?req.version(),
                         module = "api_gateway",
-                        endpoint = %req.uri().path(),
                         request_id = %rid,
                         status = Empty,
                         latency_ms = Empty,
                         // OpenTelemetry semantic conventions
                         "http.method" = %req.method(),
                         "http.target" = %req.uri().path(),
+                        "http.status_code" = Empty,
                         "http.scheme" = req.uri().scheme_str().unwrap_or("http"),
                         "http.host" = req.headers().get("host")
                             .and_then(|h| h.to_str().ok())
@@ -420,7 +433,9 @@ impl ApiGateway {
                      latency: std::time::Duration,
                      span: &tracing::Span| {
                         let ms = latency.as_millis();
-                        span.record("status", res.status().as_u16());
+                        let code = res.status().as_u16();
+                        span.record("status", code);
+                        span.record("http.status_code", code);
                         span.record("latency_ms", ms);
                     },
                 )

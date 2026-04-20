@@ -43,21 +43,14 @@ fn is_problem_response(response: &Response) -> bool {
         .is_some_and(|ct| ct.contains("application/problem+json"))
 }
 
-/// Extract trace ID from headers or generate one
+/// Extract trace ID from the current OTEL span or from request headers.
+///
+/// Delegates to [`crate::telemetry::trace_id_from_request`] so that all
+/// callers share a single, correct implementation (OTEL context → W3C
+/// `traceparent` → `x-request-id` / `x-trace-id`).
+#[must_use]
 pub fn extract_trace_id(headers: &HeaderMap) -> Option<String> {
-    // Try to get trace ID from various common headers
-    headers
-        .get("x-trace-id")
-        .or_else(|| headers.get("x-request-id"))
-        .or_else(|| headers.get("traceparent"))
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_owned)
-        .or_else(|| {
-            // Try to get from current tracing span
-            tracing::Span::current()
-                .id()
-                .map(|id| id.into_u64().to_string())
-        })
+    crate::telemetry::trace_id_from_request(headers)
 }
 
 /// Centralized error mapping function

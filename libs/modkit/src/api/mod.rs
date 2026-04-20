@@ -6,6 +6,7 @@
 
 pub mod api_dto;
 pub mod error_layer;
+pub mod handler_span;
 pub mod odata;
 pub mod openapi_registry;
 pub mod operation_builder;
@@ -21,6 +22,7 @@ mod odata_policy_tests;
 pub use error_layer::{
     IntoProblem, error_mapping_middleware, extract_trace_id, map_error_to_problem,
 };
+pub use handler_span::handler_span_middleware;
 pub use openapi_registry::{OpenApiInfo, OpenApiRegistry, OpenApiRegistryImpl, ensure_schema};
 pub use operation_builder::{
     Missing, OperationBuilder, OperationSpec, ParamLocation, ParamSpec, Present, RateLimitSpec,

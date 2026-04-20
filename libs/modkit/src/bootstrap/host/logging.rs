@@ -466,6 +466,10 @@ fn install_subscriber(
         let base = base;
 
         let base = base.with(env);
+        // Install tracing_error::ErrorLayer above the fmt layers so that error
+        // types opting in to `tracing_error::SpanTrace::capture()` see the
+        // current span context. Zero cost when unused.
+        let base = base.with(tracing_error::ErrorLayer::default());
         base.with(console_text)
             .with(console_json)
             .with(file_layer_opt)
@@ -505,7 +509,9 @@ fn init_minimal(
         #[cfg(not(feature = "otel"))]
         let base = base;
 
-        base.with(env).with(fmt_layer)
+        base.with(env)
+            .with(tracing_error::ErrorLayer::default())
+            .with(fmt_layer)
     };
 
     // LogTracer is already initialized by the caller (init_logging_unified),

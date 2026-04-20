@@ -68,6 +68,7 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 inventory = { workspace = true }
 tracing = { workspace = true }
+tracing-error = { workspace = true }
 figment = { workspace = true }
 file-rotate = { workspace = true, optional = true }
 chrono = { workspace = true, optional = true }

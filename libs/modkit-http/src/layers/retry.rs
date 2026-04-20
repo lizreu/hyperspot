@@ -10,6 +10,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use tower::{Layer, Service, ServiceExt};
+use tracing::{Instrument, debug_span, field::Empty};
 
 /// Header name for retry attempt number (1-indexed).
 /// Added to retried requests to indicate which retry attempt this is.
@@ -124,6 +125,24 @@ where
         Box::pin(async move {
             let method = parts.method.clone();
 
+            // Sanitized URL for per-attempt spans — scheme://host[:port]/path
+            // (no query, no userinfo). `Authority::as_str()` includes any
+            // `user:pass@` segment, so we rebuild from `host()` + `port()` to
+            // make sure credentials never end up in span fields or logs.
+            // Mirrors the form used by `OtelLayer` so the parent
+            // `outgoing_http` span and its `http.retry` children agree on the
+            // value of `http.url`.
+            let url_sanitized = {
+                let scheme = parts.uri.scheme_str().unwrap_or("https");
+                let host_port = parts.uri.authority().map_or(String::new(), |a| {
+                    a.port_u16().map_or_else(
+                        || a.host().to_owned(),
+                        |port| format!("{}:{}", a.host(), port),
+                    )
+                });
+                format!("{}://{}{}", scheme, host_port, parts.uri.path())
+            };
+
             // Extract request identity for logging (host + optional request-id)
             // Use authority() for full host:port, falling back to host() or "unknown"
             let url_host = parts
@@ -173,8 +192,33 @@ where
                 let mut svc = inner.clone();
                 svc.ready().await?;
 
-                match svc.call(req).await {
+                // Per-attempt child span, mirroring the gRPC retry pattern in
+                // `modkit-transport-grpc::rpc_retry::call_with_retry`.
+                // The parent is the `outgoing_http` span from `OtelLayer`, so a 3-attempt
+                // retry sequence yields three timed `http.retry` children (attempt=0,1,2),
+                // not three adjacent untimed events.
+                //
+                // `attempt` is 0-indexed: 0 = first call, 1 = first retry, etc.
+                // This matches the `attempt` counter used everywhere else in this loop
+                // and keeps the debug output self-consistent with the `x-retry-attempt`
+                // header (which is only added when `attempt > 0`, i.e. from retry #1 on).
+                let attempt_span = debug_span!(
+                    "http.retry",
+                    attempt,
+                    http.method = %method,
+                    http.url = %url_sanitized,
+                    http.status_code = Empty,
+                    error = Empty,
+                );
+
+                let call_result = async { svc.call(req).await }
+                    .instrument(attempt_span.clone())
+                    .await;
+
+                match call_result {
                     Ok(resp) => {
+                        attempt_span.record("http.status_code", resp.status().as_u16());
+
                         // Check if we should retry based on HTTP status code
                         let status_code = resp.status().as_u16();
                         let trigger = RetryTrigger::Status(status_code);
@@ -247,7 +291,11 @@ where
                                     backoff_duration
                                 };
 
-                            tracing::debug!(
+                            // Span already carries attempt / method / url / status_code; this
+                            // event is demoted to TRACE because it additionally records the
+                            // retry-decision context (trigger, backoff duration, whether
+                            // Retry-After was honored) that is not on the span fields.
+                            tracing::trace!(
                                 retry = attempt + 1,
                                 max_retries = config.max_retries,
                                 status = status_code,
@@ -268,6 +316,8 @@ where
                         return Ok(resp);
                     }
                     Err(err) => {
+                        attempt_span.record("error", true);
+
                         if config.max_retries == 0 || attempt >= config.max_retries {
                             return Err(err);
                         }
@@ -293,7 +343,11 @@ where
                                 backoff_duration
                             };
 
-                        tracing::debug!(
+                        // Span already carries attempt / method / url / error=true; this
+                        // event is demoted to TRACE because it additionally records the
+                        // retry-decision context (trigger, backoff duration, error message)
+                        // that is not on the span fields.
+                        tracing::trace!(
                             retry = attempt + 1,
                             max_retries = config.max_retries,
                             error = %err,

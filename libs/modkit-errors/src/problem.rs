@@ -158,25 +158,16 @@ impl Problem {
 
 /// Axum integration: make Problem directly usable as a response.
 ///
-/// Automatically enriches the Problem with `trace_id` from the current
-/// tracing span if not already set.
+/// Setting `trace_id` is the caller's responsibility (via
+/// [`Problem::with_trace_id`] or `WithTraceContext` in `modkit`) — this
+/// impl intentionally does not auto-enrich, because the only correct
+/// source (OTEL span context) lives in a higher-level crate.
 #[cfg(feature = "axum")]
 impl axum::response::IntoResponse for Problem {
     fn into_response(self) -> axum::response::Response {
         use axum::http::HeaderValue;
-
-        // Enrich with trace_id from current span if not already set
-        let problem = if self.trace_id.is_none() {
-            match tracing::Span::current().id() {
-                Some(span_id) => self.with_trace_id(span_id.into_u64().to_string()),
-                _ => self,
-            }
-        } else {
-            self
-        };
-
-        let status = problem.status;
-        let mut resp = axum::Json(problem).into_response();
+        let status = self.status;
+        let mut resp = axum::Json(self).into_response();
         *resp.status_mut() = status;
         resp.headers_mut().insert(
             axum::http::header::CONTENT_TYPE,

@@ -3,6 +3,16 @@
 //! This module provides `SecureConn`, a wrapper around a private `SeaORM` connection
 //! that enforces access control policies on all operations.
 //!
+//! # Tracing
+//!
+//! Public async query entry points (`insert`, `update_with_ctx`, `delete_by_id`) and
+//! transaction boundaries (`transaction`, `transaction_with`, `transaction_with_config`,
+//! `in_transaction`, `in_transaction_mapped`) emit `#[tracing::instrument]` spans at
+//! `DEBUG` level with OTEL semantic-convention fields (`db.system`, `db.operation`,
+//! `entity`). These spans capture timing and error signals but intentionally do NOT
+//! record individual SQL statement text — enabling `SeaORM`'s `sqlx_logging(true)` is
+//! tracked as a follow-up (see `TODO(tracing follow-up)` in `lib.rs` / `options.rs`).
+//!
 //! Plugin/module developers should never handle raw `DatabaseConnection` or manually
 //! apply scopes. Instead, they receive a `SecureConn` instance that guarantees:
 //!
@@ -317,6 +327,17 @@ impl SecureConn {
     ///
     /// - `ScopeError::Invalid` if entity requires tenant but scope has none
     /// - `ScopeError::Db` if database insert fails
+    #[tracing::instrument(
+        level = "debug",
+        name = "db.insert",
+        skip_all,
+        fields(
+            db.system = self.db_engine(),
+            db.operation = "INSERT",
+            entity = std::any::type_name::<E>(),
+        ),
+        err,
+    )]
     pub async fn insert<E>(
         &self,
         scope: &AccessScope,
@@ -366,6 +387,17 @@ impl SecureConn {
     ///
     /// - `ScopeError::Denied` if the entity is not accessible in the current scope
     /// - `ScopeError::Db` if the database operation fails
+    #[tracing::instrument(
+        level = "debug",
+        name = "db.update",
+        skip_all,
+        fields(
+            db.system = self.db_engine(),
+            db.operation = "UPDATE",
+            entity = std::any::type_name::<E>(),
+        ),
+        err,
+    )]
     pub async fn update_with_ctx<E>(
         &self,
         scope: &AccessScope,
@@ -400,6 +432,17 @@ impl SecureConn {
     /// # Errors
     ///
     /// Returns `ScopeError::Invalid` if the entity does not have a `resource_col` defined.
+    #[tracing::instrument(
+        level = "debug",
+        name = "db.delete",
+        skip_all,
+        fields(
+            db.system = self.db_engine(),
+            db.operation = "DELETE",
+            entity = std::any::type_name::<E>(),
+        ),
+        err,
+    )]
     pub async fn delete_by_id<E>(&self, scope: &AccessScope, id: Uuid) -> Result<bool, ScopeError>
     where
         E: ScopableEntity + EntityTrait,
@@ -488,6 +531,15 @@ impl SecureConn {
     /// - The transaction cannot be started
     /// - A database operation fails (transaction is rolled back)
     /// - The commit fails
+    #[tracing::instrument(
+        level = "debug",
+        name = "db.txn",
+        skip_all,
+        fields(
+            db.system = self.db_engine(),
+            otel.kind = "client",
+        ),
+    )]
     pub async fn transaction<F>(self, f: F) -> (Self, anyhow::Result<()>)
     where
         F: for<'a> FnOnce(
@@ -552,6 +604,15 @@ impl SecureConn {
     /// - The transaction cannot be started
     /// - A database operation fails (transaction is rolled back)
     /// - The commit fails
+    #[tracing::instrument(
+        level = "debug",
+        name = "db.txn",
+        skip_all,
+        fields(
+            db.system = self.db_engine(),
+            otel.kind = "client",
+        ),
+    )]
     pub async fn transaction_with<T, F>(self, f: F) -> (Self, anyhow::Result<T>)
     where
         T: Send + 'static,
@@ -646,6 +707,15 @@ impl SecureConn {
     /// - The transaction cannot be started with the specified configuration
     /// - A database operation fails (transaction is rolled back)
     /// - The commit fails
+    #[tracing::instrument(
+        level = "debug",
+        name = "db.txn",
+        skip_all,
+        fields(
+            db.system = self.db_engine(),
+            otel.kind = "client",
+        ),
+    )]
     pub async fn transaction_with_config<T, F>(
         self,
         cfg: TxConfig,
@@ -732,6 +802,15 @@ impl SecureConn {
     /// The `Result` component is `Err(TxError<E>)` if:
     /// - The callback returns a domain error (`TxError::Domain(E)`).
     /// - The transaction fails due to a database/infrastructure error (`TxError::Infra(InfraError)`).
+    #[tracing::instrument(
+        level = "debug",
+        name = "db.txn",
+        skip_all,
+        fields(
+            db.system = self.db_engine(),
+            otel.kind = "client",
+        ),
+    )]
     pub async fn in_transaction<T, E, F>(self, f: F) -> (Self, Result<T, TxError<E>>)
     where
         T: Send + 'static,
@@ -798,6 +877,10 @@ impl SecureConn {
     /// The `Result` component is `Err(E)` if:
     /// - The callback returns a domain error (`E`).
     /// - The transaction fails due to a database/infrastructure error, mapped via `map_infra`.
+    //
+    // Intentionally not `#[tracing::instrument]`: this delegates to
+    // `in_transaction`, which already emits the `db.txn` span. Annotating both
+    // would produce a duplicate nested span for the same transaction boundary.
     pub async fn in_transaction_mapped<T, E, F, M>(self, map_infra: M, f: F) -> (Self, Result<T, E>)
     where
         T: Send + 'static,

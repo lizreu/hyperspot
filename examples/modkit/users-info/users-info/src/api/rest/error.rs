@@ -119,9 +119,9 @@ fn canonical_to_problem(ce: &CanonicalError) -> Problem {
         problem = problem.with_errors(errors);
     }
 
-    // Enrich trace_id from current span
-    if let Some(span_id) = tracing::Span::current().id() {
-        problem = problem.with_trace_id(span_id.into_u64().to_string());
+    // Enrich trace_id from current OTEL span (falls back to None without OTEL).
+    if let Some(trace_id) = modkit::telemetry::current_trace_id() {
+        problem = problem.with_trace_id(trace_id);
     }
 
     problem

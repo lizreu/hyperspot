@@ -6,6 +6,7 @@
 pub mod config;
 pub mod init;
 pub mod throttled_log;
+pub mod trace_id;
 
 pub use config::{
     Exporter, HttpOpts, LogsCorrelation, MetricsConfig, OpenTelemetryConfig, OpenTelemetryResource,
@@ -15,3 +16,4 @@ pub use config::{
 pub use init::init_tracing;
 pub use init::{init_metrics_provider, shutdown_tracing};
 pub use throttled_log::ThrottledLog;
+pub use trace_id::{current_trace_id, trace_id_from_request};

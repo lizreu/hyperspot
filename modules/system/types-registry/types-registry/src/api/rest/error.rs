@@ -7,9 +7,7 @@ use crate::domain::error::DomainError;
 
 impl From<DomainError> for Problem {
     fn from(e: DomainError) -> Self {
-        let trace_id = tracing::Span::current()
-            .id()
-            .map(|id| id.into_u64().to_string());
+        let trace_id = modkit::telemetry::current_trace_id();
 
         let (status, code, title, detail) = match &e {
             DomainError::InvalidGtsId(msg) => (

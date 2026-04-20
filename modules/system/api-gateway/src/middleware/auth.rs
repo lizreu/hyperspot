@@ -1,6 +1,7 @@
 use axum::http::Method;
 use axum::response::IntoResponse;
 use std::{collections::HashMap, sync::Arc};
+use tracing::{Instrument, field::Empty, info_span};
 
 use crate::middleware::common;
 
@@ -201,45 +202,94 @@ pub async fn authn_middleware(
     mut req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    // Skip CORS preflight — insert anonymous SecurityContext so downstream
-    // handlers that extract Extension<SecurityContext> don't panic.
-    if is_preflight_request(req.method(), req.headers()) {
-        req.extensions_mut().insert(SecurityContext::anonymous());
-        return next.run(req).await;
-    }
+    let span = info_span!(
+        "auth",
+        otel.kind = "internal",
+        auth.method = Empty,
+        auth.requirement = Empty,
+        auth.principal = Empty,
+        auth.tenant = Empty,
+        auth.result = Empty,
+    );
 
-    let path = req
-        .extensions()
-        .get::<axum::extract::MatchedPath>()
-        .map_or_else(|| req.uri().path().to_owned(), |p| p.as_str().to_owned());
-
-    let path = common::resolve_path(&req, path.as_str());
-
-    let requirement = state.route_policy.resolve(req.method(), path.as_str());
-
-    match requirement {
-        AuthRequirement::None => {
+    async move {
+        // Skip CORS preflight — insert anonymous SecurityContext so downstream
+        // handlers that extract Extension<SecurityContext> don't panic.
+        if is_preflight_request(req.method(), req.headers()) {
+            let current = tracing::Span::current();
+            current.record("auth.method", "preflight");
+            current.record("auth.result", "skipped");
             req.extensions_mut().insert(SecurityContext::anonymous());
-            next.run(req).await
+            return next.run(req).await;
         }
-        AuthRequirement::Required => {
-            let Some(token) = extract_bearer_token(req.headers()) else {
-                return Problem::new(
-                    axum::http::StatusCode::UNAUTHORIZED,
-                    "Unauthorized",
-                    "Missing or invalid Authorization header",
-                )
-                .into_response();
-            };
 
-            match state.authn_client.authenticate(token).await {
-                Ok(result) => {
-                    req.extensions_mut().insert(result.security_context);
-                    next.run(req).await
+        let path = req
+            .extensions()
+            .get::<axum::extract::MatchedPath>()
+            .map_or_else(|| req.uri().path().to_owned(), |p| p.as_str().to_owned());
+
+        let path = common::resolve_path(&req, path.as_str());
+
+        let requirement = state.route_policy.resolve(req.method(), path.as_str());
+        let current = tracing::Span::current();
+        match requirement {
+            AuthRequirement::None => {
+                current.record("auth.requirement", "public");
+                current.record("auth.method", "anonymous");
+                current.record("auth.result", "ok");
+                req.extensions_mut().insert(SecurityContext::anonymous());
+                next.run(req).await
+            }
+            AuthRequirement::Required => {
+                current.record("auth.requirement", "required");
+                current.record("auth.method", "bearer");
+                let Some(token) = extract_bearer_token(req.headers()) else {
+                    current.record("auth.result", "no_credentials");
+                    return with_trace_id(Problem::new(
+                        axum::http::StatusCode::UNAUTHORIZED,
+                        "Unauthorized",
+                        "Missing or invalid Authorization header",
+                    ))
+                    .into_response();
+                };
+
+                match state.authn_client.authenticate(token).await {
+                    Ok(result) => {
+                        current.record(
+                            "auth.principal",
+                            tracing::field::display(result.security_context.subject_id()),
+                        );
+                        current.record(
+                            "auth.tenant",
+                            tracing::field::display(result.security_context.subject_tenant_id()),
+                        );
+                        current.record("auth.result", "ok");
+                        req.extensions_mut().insert(result.security_context);
+                        next.run(req).await
+                    }
+                    Err(err) => {
+                        current.record("auth.result", authn_error_result_label(&err));
+                        authn_error_to_response(&err)
+                    }
                 }
-                Err(err) => authn_error_to_response(&err),
             }
         }
+    }
+    .instrument(span)
+    .await
+}
+
+/// Stable, low-cardinality label describing why authentication failed.
+///
+/// These strings are used for the `auth.result` span field and must stay in
+/// sync with the arms of `authn_error_to_response`.
+fn authn_error_result_label(err: &AuthNResolverError) -> &'static str {
+    match err {
+        AuthNResolverError::Unauthorized(_) => "unauthorized",
+        AuthNResolverError::NoPluginAvailable => "no_plugin",
+        AuthNResolverError::ServiceUnavailable(_) => "service_unavailable",
+        AuthNResolverError::TokenAcquisitionFailed(_) => "token_acquisition_failed",
+        AuthNResolverError::Internal(_) => "internal",
     }
 }
 
@@ -263,7 +313,18 @@ fn authn_error_to_response(err: &AuthNResolverError) -> axum::response::Response
             "Internal authentication error",
         ),
     };
-    Problem::new(status, title, detail).into_response()
+    with_trace_id(Problem::new(status, title, detail)).into_response()
+}
+
+/// Attach the active OTEL span's W3C trace ID to a `Problem`, when one is
+/// available. After dropping the auto-enrich in `Problem::into_response`
+/// (PR #1570), error responses must do this explicitly so that clients can
+/// correlate the failure with collected traces.
+fn with_trace_id(p: Problem) -> Problem {
+    match modkit::telemetry::current_trace_id() {
+        Some(tid) => p.with_trace_id(tid),
+        None => p,
+    }
 }
 
 /// Log authentication errors at appropriate levels.

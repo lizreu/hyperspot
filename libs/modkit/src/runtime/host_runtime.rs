@@ -18,6 +18,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
+use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::backends::OopSpawnConfig;
@@ -158,9 +159,8 @@ impl HostRuntime {
     ///
     /// # Errors
     /// Returns `RegistryError` if system wiring fails.
+    #[tracing::instrument(level = "info", skip_all, fields(phase = "pre_init"), err)]
     pub fn run_pre_init_phase(&self) -> Result<(), RegistryError> {
-        tracing::info!("Phase: pre_init");
-
         let sys_ctx = SystemContext::new(
             self.instance_id,
             Arc::clone(&self.module_manager),
@@ -175,13 +175,16 @@ impl HostRuntime {
             }
 
             if let Some(sys_mod) = entry.caps.query::<SystemCap>() {
-                tracing::debug!(module = entry.name, "Running system pre_init");
-                sys_mod
-                    .pre_init(&sys_ctx)
-                    .map_err(|e| RegistryError::PreInit {
-                        module: entry.name,
-                        source: e,
-                    })?;
+                let span = tracing::info_span!("module.pre_init", module = %entry.name);
+                span.in_scope(|| {
+                    tracing::debug!(module = entry.name, "Running system pre_init");
+                    sys_mod
+                        .pre_init(&sys_ctx)
+                        .map_err(|e| RegistryError::PreInit {
+                            module: entry.name,
+                            source: e,
+                        })
+                })?;
             }
         }
 
@@ -287,9 +290,8 @@ impl HostRuntime {
     /// never receive directly. Each module gets a separate migration history
     /// table, preventing cross-module interference.
     #[cfg(feature = "db")]
+    #[tracing::instrument(level = "info", skip_all, fields(phase = "db"), err)]
     async fn run_db_phase(&self) -> Result<(), RegistryError> {
-        tracing::info!("Phase: db (before init)");
-
         for entry in self.registry.modules_by_system_priority() {
             // Check for cancellation before processing each module
             if self.cancel.is_cancelled() {
@@ -297,24 +299,30 @@ impl HostRuntime {
                 return Err(RegistryError::Cancelled);
             }
 
-            let ctx = self.module_context(entry.name).await?;
-            let db_module = entry.caps.query::<DatabaseCap>();
+            let span = tracing::info_span!("db.migrate", module = %entry.name);
+            async {
+                let ctx = self.module_context(entry.name).await?;
+                let db_module = entry.caps.query::<DatabaseCap>();
 
-            match self
-                .db_migration_target(entry.name, &ctx, db_module.clone())
-                .await?
-            {
-                Some((db, dbm)) => {
-                    Self::migrate_module(entry.name, &db, dbm).await?;
+                match self
+                    .db_migration_target(entry.name, &ctx, db_module.clone())
+                    .await?
+                {
+                    Some((db, dbm)) => {
+                        Self::migrate_module(entry.name, &db, dbm).await?;
+                    }
+                    None if db_module.is_some() => {
+                        tracing::debug!(
+                            module = entry.name,
+                            "Module has DbModule trait but no DB handle (no config)"
+                        );
+                    }
+                    None => {}
                 }
-                None if db_module.is_some() => {
-                    tracing::debug!(
-                        module = entry.name,
-                        "Module has DbModule trait but no DB handle (no config)"
-                    );
-                }
-                None => {}
+                Ok::<_, RegistryError>(())
             }
+            .instrument(span)
+            .await?;
         }
 
         Ok(())
@@ -323,28 +331,31 @@ impl HostRuntime {
     /// INIT phase: initialize all modules in topological order.
     ///
     /// System modules initialize first, followed by user modules.
+    #[tracing::instrument(level = "info", skip_all, fields(phase = "init"), err)]
     async fn run_init_phase(&self) -> Result<(), RegistryError> {
-        tracing::info!("Phase: init");
-
         for entry in self.registry.modules_by_system_priority() {
-            let ctx =
-                self.ctx_builder
-                    .for_module(entry.name)
+            let span = tracing::info_span!("module.init", module = %entry.name);
+            async {
+                let ctx = self.ctx_builder.for_module(entry.name).await.map_err(|e| {
+                    RegistryError::Init {
+                        module: entry.name,
+                        source: e,
+                    }
+                })?;
+                tracing::debug!(module = entry.name, "Initializing a module...");
+                entry
+                    .core
+                    .init(&ctx)
                     .await
                     .map_err(|e| RegistryError::Init {
                         module: entry.name,
                         source: e,
                     })?;
-            tracing::info!(module = entry.name, "Initializing a module...");
-            entry
-                .core
-                .init(&ctx)
-                .await
-                .map_err(|e| RegistryError::Init {
-                    module: entry.name,
-                    source: e,
-                })?;
-            tracing::info!(module = entry.name, "Initialized a module.");
+                tracing::debug!(module = entry.name, "Initialized a module.");
+                Ok::<_, RegistryError>(())
+            }
+            .instrument(span)
+            .await?;
         }
 
         Ok(())
@@ -356,9 +367,8 @@ impl HostRuntime {
     /// and subsequent phases that may rely on a fully-populated runtime registry.
     ///
     /// System modules run first, followed by user modules, preserving topo order.
+    #[tracing::instrument(level = "info", skip_all, fields(phase = "post_init"), err)]
     async fn run_post_init_phase(&self) -> Result<(), RegistryError> {
-        tracing::info!("Phase: post_init");
-
         let sys_ctx = SystemContext::new(
             self.instance_id,
             Arc::clone(&self.module_manager),
@@ -367,13 +377,18 @@ impl HostRuntime {
 
         for entry in self.registry.modules_by_system_priority() {
             if let Some(sys_mod) = entry.caps.query::<SystemCap>() {
-                sys_mod
-                    .post_init(&sys_ctx)
-                    .await
-                    .map_err(|e| RegistryError::PostInit {
-                        module: entry.name,
-                        source: e,
-                    })?;
+                let span = tracing::info_span!("module.post_init", module = %entry.name);
+                async {
+                    sys_mod
+                        .post_init(&sys_ctx)
+                        .await
+                        .map_err(|e| RegistryError::PostInit {
+                            module: entry.name,
+                            source: e,
+                        })
+                }
+                .instrument(span)
+                .await?;
             }
         }
 
@@ -386,9 +401,8 @@ impl HostRuntime {
     /// 1. Preparing the host module
     /// 2. Registering all REST providers
     /// 3. Finalizing with `OpenAPI` endpoints
+    #[tracing::instrument(level = "info", skip_all, fields(phase = "rest"), err)]
     async fn run_rest_phase(&self) -> Result<Router, RegistryError> {
-        tracing::info!("Phase: rest (sync)");
-
         let mut router = Router::new();
 
         // Find host(s) and whether any rest modules exist
@@ -440,29 +454,36 @@ impl HostRuntime {
         let registry: &dyn crate::contracts::OpenApiRegistry = host.as_registry();
 
         // 1) Host prepare: base Router / global middlewares / basic OAS meta
-        router =
+        router = {
+            let prepare_span = tracing::info_span!("rest.prepare", module = %host_entry.name);
+            let _enter = prepare_span.enter();
             host.rest_prepare(&host_ctx, router)
                 .map_err(|source| RegistryError::RestPrepare {
                     module: host_entry.name,
                     source,
-                })?;
+                })?
+        };
 
         // 2) Register all REST providers (in the current discovery order)
         for e in self.registry.modules() {
             if let Some(rest) = e.caps.query::<RestApiCap>() {
-                let ctx = self.ctx_builder.for_module(e.name).await.map_err(|err| {
-                    RegistryError::RestRegister {
-                        module: e.name,
-                        source: err,
-                    }
-                })?;
-
-                router = rest
-                    .register_rest(&ctx, router, registry)
-                    .map_err(|source| RegistryError::RestRegister {
-                        module: e.name,
-                        source,
+                let span = tracing::info_span!("rest.register", module = %e.name);
+                router = async {
+                    let ctx = self.ctx_builder.for_module(e.name).await.map_err(|err| {
+                        RegistryError::RestRegister {
+                            module: e.name,
+                            source: err,
+                        }
                     })?;
+
+                    rest.register_rest(&ctx, router, registry)
+                        .map_err(|source| RegistryError::RestRegister {
+                            module: e.name,
+                            source,
+                        })
+                }
+                .instrument(span)
+                .await?;
             }
         }
 
@@ -480,9 +501,8 @@ impl HostRuntime {
     /// gRPC registration phase: collect services from all grpc modules.
     ///
     /// Services are stored in the installer store for the `grpc-hub` to consume during start.
+    #[tracing::instrument(level = "info", skip_all, fields(phase = "grpc"), err)]
     async fn run_grpc_phase(&self) -> Result<(), RegistryError> {
-        tracing::info!("Phase: grpc (registration)");
-
         // If no grpc_hub and no grpc_services, skip the phase
         if self.registry.grpc_hub.is_none() && self.registry.grpc_services.is_empty() {
             return Ok(());
@@ -500,23 +520,27 @@ impl HostRuntime {
 
             // Collect services from all grpc modules
             for (module_name, service_module) in &self.registry.grpc_services {
-                let ctx = self
-                    .ctx_builder
-                    .for_module(module_name)
-                    .await
-                    .map_err(|err| RegistryError::GrpcRegister {
-                        module: module_name.clone(),
-                        source: err,
-                    })?;
+                let span = tracing::info_span!("grpc.register", module = %module_name);
+                let installers = async {
+                    let ctx = self
+                        .ctx_builder
+                        .for_module(module_name)
+                        .await
+                        .map_err(|err| RegistryError::GrpcRegister {
+                            module: module_name.clone(),
+                            source: err,
+                        })?;
 
-                let installers =
                     service_module
                         .get_grpc_services(&ctx)
                         .await
                         .map_err(|source| RegistryError::GrpcRegister {
                             module: module_name.clone(),
                             source,
-                        })?;
+                        })
+                }
+                .instrument(span)
+                .await?;
 
                 for reg in &installers {
                     if !seen.insert(reg.service_name) {
@@ -552,23 +576,28 @@ impl HostRuntime {
     /// START phase: start all stateful modules.
     ///
     /// System modules start first, followed by user modules.
+    #[tracing::instrument(level = "info", skip_all, fields(phase = "start"), err)]
     async fn run_start_phase(&self) -> Result<(), RegistryError> {
-        tracing::info!("Phase: start");
-
         for e in self.registry.modules_by_system_priority() {
             if let Some(s) = e.caps.query::<RunnableCap>() {
-                tracing::debug!(
-                    module = e.name,
-                    is_system = e.caps.has::<SystemCap>(),
-                    "Starting stateful module"
-                );
-                s.start(self.cancel.clone())
-                    .await
-                    .map_err(|source| RegistryError::Start {
-                        module: e.name,
-                        source,
-                    })?;
-                tracing::info!(module = e.name, "Started module");
+                let span = tracing::info_span!("module.start", module = %e.name);
+                async {
+                    tracing::debug!(
+                        module = e.name,
+                        is_system = e.caps.has::<SystemCap>(),
+                        "Starting stateful module"
+                    );
+                    s.start(self.cancel.clone())
+                        .await
+                        .map_err(|source| RegistryError::Start {
+                            module: e.name,
+                            source,
+                        })?;
+                    tracing::debug!(module = e.name, "Started module");
+                    Ok::<_, RegistryError>(())
+                }
+                .instrument(span)
+                .await?;
             }
         }
 
@@ -583,7 +612,7 @@ impl HostRuntime {
                     tracing::warn!(module = entry.name, error = %err, "Failed to stop module");
                 }
                 _ => {
-                    tracing::info!(module = entry.name, "Stopped module");
+                    tracing::debug!(module = entry.name, "Stopped module");
                 }
             }
         }
@@ -613,39 +642,42 @@ impl HostRuntime {
     /// Errors are logged but do not fail the shutdown process.
     /// Note: `OoP` modules are stopped automatically by the backend when the
     /// cancellation token is triggered.
+    #[tracing::instrument(level = "info", skip_all, fields(phase = "stop"), err)]
     async fn run_stop_phase(&self) -> Result<(), RegistryError> {
-        tracing::info!("Phase: stop");
-
         let deadline = self.shutdown_deadline;
 
         // Stop all modules in reverse order, each with its own independent deadline
         for e in self.registry.modules().iter().rev() {
             let module_name = e.name;
+            let span = tracing::info_span!("module.stop", module = %module_name);
+            async {
+                // Create a fresh deadline token for THIS module
+                // Each module gets the full shutdown_deadline independently
+                let deadline_token = CancellationToken::new();
+                let deadline_token_for_timeout = deadline_token.clone();
 
-            // Create a fresh deadline token for THIS module
-            // Each module gets the full shutdown_deadline independently
-            let deadline_token = CancellationToken::new();
-            let deadline_token_for_timeout = deadline_token.clone();
+                // Spawn a task to cancel this module's deadline token after shutdown_deadline
+                let deadline_task = tokio::spawn(async move {
+                    tokio::time::sleep(deadline).await;
+                    tracing::warn!(
+                        module = module_name,
+                        deadline_secs = deadline.as_secs(),
+                        "Module shutdown deadline reached, sending hard-stop signal"
+                    );
+                    deadline_token_for_timeout.cancel();
+                });
 
-            // Spawn a task to cancel this module's deadline token after shutdown_deadline
-            let deadline_task = tokio::spawn(async move {
-                tokio::time::sleep(deadline).await;
-                tracing::warn!(
-                    module = module_name,
-                    deadline_secs = deadline.as_secs(),
-                    "Module shutdown deadline reached, sending hard-stop signal"
-                );
-                deadline_token_for_timeout.cancel();
-            });
+                // Stop this module with its own deadline token
+                // The module can observe the token transition from uncancelled→cancelled
+                Self::stop_one_module(e, deadline_token).await;
 
-            // Stop this module with its own deadline token
-            // The module can observe the token transition from uncancelled→cancelled
-            Self::stop_one_module(e, deadline_token).await;
-
-            // Cancel the deadline task and await it to ensure full cleanup
-            deadline_task.abort();
-            #[allow(clippy::let_underscore_must_use)]
-            let _ = deadline_task.await;
+                // Cancel the deadline task and await it to ensure full cleanup
+                deadline_task.abort();
+                #[allow(clippy::let_underscore_must_use)]
+                let _ = deadline_task.await;
+            }
+            .instrument(span)
+            .await;
         }
 
         Ok(())
@@ -655,54 +687,57 @@ impl HostRuntime {
     ///
     /// This phase runs after `grpc-hub` is already listening, so we can pass
     /// the real directory endpoint to `OoP` modules.
+    #[tracing::instrument(level = "info", skip_all, fields(phase = "oop_spawn"), err)]
     async fn run_oop_spawn_phase(&self) -> Result<(), RegistryError> {
         let oop_opts = match &self.oop_options {
             Some(opts) if !opts.modules.is_empty() => opts,
             _ => return Ok(()),
         };
 
-        tracing::info!("Phase: oop_spawn");
-
         // Wait for grpc_hub to publish its endpoint (it runs async in start phase)
         let directory_endpoint = self.wait_for_grpc_hub_endpoint().await;
 
         for module_cfg in &oop_opts.modules {
-            // Build environment with directory endpoint and rendered config
-            // Note: User controls --config via execution.args in master config
-            let mut env = module_cfg.env.clone();
-            env.insert(
-                MODKIT_MODULE_CONFIG_ENV.to_owned(),
-                module_cfg.rendered_config_json.clone(),
-            );
-            if let Some(ref endpoint) = directory_endpoint {
-                env.insert(MODKIT_DIRECTORY_ENDPOINT_ENV.to_owned(), endpoint.clone());
-            }
+            let span = tracing::info_span!("oop.spawn", module = %module_cfg.module_name);
+            async {
+                // Build environment with directory endpoint and rendered config
+                // Note: User controls --config via execution.args in master config
+                let mut env = module_cfg.env.clone();
+                env.insert(
+                    MODKIT_MODULE_CONFIG_ENV.to_owned(),
+                    module_cfg.rendered_config_json.clone(),
+                );
+                if let Some(ref endpoint) = directory_endpoint {
+                    env.insert(MODKIT_DIRECTORY_ENDPOINT_ENV.to_owned(), endpoint.clone());
+                }
 
-            // Use args from execution config as-is (user controls --config via args)
-            let args = module_cfg.args.clone();
+                // Use args from execution config as-is (user controls --config via args)
+                let args = module_cfg.args.clone();
 
-            let spawn_config = OopSpawnConfig {
-                module_name: module_cfg.module_name.clone(),
-                binary: module_cfg.binary.clone(),
-                args,
-                env,
-                working_directory: module_cfg.working_directory.clone(),
-            };
+                let spawn_config = OopSpawnConfig {
+                    module_name: module_cfg.module_name.clone(),
+                    binary: module_cfg.binary.clone(),
+                    args,
+                    env,
+                    working_directory: module_cfg.working_directory.clone(),
+                };
 
-            oop_opts
-                .backend
-                .spawn(spawn_config)
-                .await
-                .map_err(|e| RegistryError::OopSpawn {
-                    module: module_cfg.module_name.clone(),
-                    source: e,
+                oop_opts.backend.spawn(spawn_config).await.map_err(|e| {
+                    RegistryError::OopSpawn {
+                        module: module_cfg.module_name.clone(),
+                        source: e,
+                    }
                 })?;
 
-            tracing::info!(
-                module = %module_cfg.module_name,
-                directory_endpoint = ?directory_endpoint,
-                "Spawned OoP module via backend"
-            );
+                tracing::debug!(
+                    module = %module_cfg.module_name,
+                    directory_endpoint = ?directory_endpoint,
+                    "Spawned OoP module via backend"
+                );
+                Ok::<_, RegistryError>(())
+            }
+            .instrument(span)
+            .await?;
         }
 
         Ok(())

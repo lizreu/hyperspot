@@ -61,13 +61,20 @@ where
         let method = req.method().clone();
         let uri = req.uri().clone();
 
-        // Sanitize URL for tracing: remove query string to avoid leaking sensitive params
-        let url_str = format!(
-            "{}://{}{}",
-            uri.scheme_str().unwrap_or("https"),
-            uri.authority().map_or("", http::uri::Authority::as_str),
-            uri.path()
-        );
+        // Sanitize URL for tracing: drop the query string AND userinfo.
+        // `Authority::as_str()` includes any `user:pass@` segment, so we
+        // rebuild from `host()` + `port()` to keep credentials out of span
+        // fields and log output.
+        let url_str = {
+            let scheme = uri.scheme_str().unwrap_or("https");
+            let host_port = uri.authority().map_or(String::new(), |a| {
+                a.port_u16().map_or_else(
+                    || a.host().to_owned(),
+                    |port| format!("{}:{}", a.host(), port),
+                )
+            });
+            format!("{}://{}{}", scheme, host_port, uri.path())
+        };
 
         // Create span before injection so that inject_current_span propagates
         // this span's context (not the parent's) into the outgoing request headers.

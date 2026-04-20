@@ -347,6 +347,9 @@ impl DbHandle {
             DbEngine::Postgres => {
                 let o = PgPoolOptions::new().apply(&opts);
                 let pool = o.connect(dsn).await?;
+                // TODO(tracing follow-up): switch to `sea_orm::Database::connect(ConnectOptions)` to enable
+                // SeaORM's built-in sqlx_logging for DB statement tracing. Current path takes a
+                // pre-built sqlx pool which bypasses SeaORM's ConnectOptions.
                 let sea = SqlxPostgresConnector::from_sqlx_postgres_pool(pool);
                 Ok(Self {
                     engine,
@@ -360,6 +363,9 @@ impl DbHandle {
             DbEngine::MySql => {
                 let o = MySqlPoolOptions::new().apply(&opts);
                 let pool = o.connect(dsn).await?;
+                // TODO(tracing follow-up): switch to `sea_orm::Database::connect(ConnectOptions)` to enable
+                // SeaORM's built-in sqlx_logging for DB statement tracing. Current path takes a
+                // pre-built sqlx pool which bypasses SeaORM's ConnectOptions.
                 let sea = SqlxMySqlConnector::from_sqlx_mysql_pool(pool);
                 Ok(Self {
                     engine,
@@ -438,6 +444,9 @@ impl DbHandle {
                 }
 
                 let pool = o.connect_with(conn_opts).await?;
+                // TODO(tracing follow-up): switch to `sea_orm::Database::connect(ConnectOptions)` to enable
+                // SeaORM's built-in sqlx_logging for DB statement tracing. Current path takes a
+                // pre-built sqlx pool which bypasses SeaORM's ConnectOptions.
                 let sea = SqlxSqliteConnector::from_sqlx_sqlite_pool(pool);
 
                 Ok(Self {
