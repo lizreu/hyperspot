@@ -6,10 +6,18 @@ use super::*;
 // ── From<TypesRegistryError> ─────────────────────────────────────────────
 
 #[test]
-fn from_types_registry_error_becomes_internal() {
+fn from_types_registry_error_becomes_types_registry_unavailable() {
     let src = types_registry_sdk::TypesRegistryError::internal("oops");
     let dst = DomainError::from(src);
-    assert!(matches!(dst, DomainError::Internal(_)));
+    match &dst {
+        DomainError::TypesRegistryUnavailable(source) => {
+            assert!(
+                source.to_string().contains("oops"),
+                "expected source to preserve 'oops', got: {source}"
+            );
+        }
+        _ => panic!("expected TypesRegistryUnavailable, got: {dst:?}"),
+    }
 }
 
 // ── From<ClientHubError> ─────────────────────────────────────────────────
@@ -70,16 +78,21 @@ fn from_credstore_error_not_found_becomes_not_found() {
 
 #[test]
 fn from_credstore_error_no_plugin_available_becomes_plugin_not_found() {
-    let dst = DomainError::from(CredStoreError::NoPluginAvailable);
-    assert!(matches!(dst, DomainError::PluginNotFound { vendor } if vendor == "unknown"));
+    let dst = DomainError::from(CredStoreError::NoPluginAvailable {
+        vendor: "acme".into(),
+    });
+    assert!(matches!(dst, DomainError::PluginNotFound { vendor } if vendor == "acme"));
 }
 
 #[test]
 fn from_credstore_error_service_unavailable_becomes_plugin_unavailable() {
-    let dst = DomainError::from(CredStoreError::ServiceUnavailable("down".into()));
+    let dst = DomainError::from(CredStoreError::ServiceUnavailable {
+        gts_id: "gts.x.core.creds.plugin.acme.v1~".into(),
+        reason: "down".into(),
+    });
     assert!(
         matches!(dst, DomainError::PluginUnavailable { gts_id, reason }
-        if gts_id == "unknown" && reason == "down")
+        if gts_id == "gts.x.core.creds.plugin.acme.v1~" && reason == "down")
     );
 }
 
@@ -88,13 +101,19 @@ fn from_credstore_error_invalid_secret_ref_becomes_internal() {
     let dst = DomainError::from(CredStoreError::InvalidSecretRef {
         reason: "bad".into(),
     });
-    assert!(matches!(dst, DomainError::Internal(msg) if msg == "bad"));
+    match &dst {
+        DomainError::Internal(src) => assert_eq!(src.to_string(), "bad"),
+        _ => panic!("expected Internal, got {dst:?}"),
+    }
 }
 
 #[test]
 fn from_credstore_error_internal_becomes_internal() {
     let dst = DomainError::from(CredStoreError::Internal("boom".into()));
-    assert!(matches!(dst, DomainError::Internal(msg) if msg == "boom"));
+    match &dst {
+        DomainError::Internal(src) => assert_eq!(src.to_string(), "boom"),
+        _ => panic!("expected Internal, got {dst:?}"),
+    }
 }
 
 // ── From<DomainError> for CredStoreError ────────────────────────────────
@@ -105,7 +124,7 @@ fn domain_plugin_not_found_becomes_no_plugin_available() {
         vendor: "acme".into(),
     };
     let dst = CredStoreError::from(src);
-    assert!(matches!(dst, CredStoreError::NoPluginAvailable));
+    assert!(matches!(dst, CredStoreError::NoPluginAvailable { vendor } if vendor == "acme"));
 }
 
 #[test]
@@ -130,9 +149,37 @@ fn domain_plugin_unavailable_becomes_service_unavailable() {
     };
     let dst = CredStoreError::from(src);
     assert!(
-        matches!(dst, CredStoreError::ServiceUnavailable(ref msg)
-            if msg.contains("gts.x.core.test.error.v1~") && msg.contains("not ready")),
+        matches!(dst, CredStoreError::ServiceUnavailable { ref gts_id, ref reason }
+            if gts_id == "gts.x.core.test.error.v1~" && reason == "not ready"),
         "expected ServiceUnavailable with gts_id and reason, got: {dst:?}"
+    );
+}
+
+#[test]
+fn roundtrip_credstore_to_domain_preserves_vendor() {
+    let src = CredStoreError::NoPluginAvailable {
+        vendor: "acme".into(),
+    };
+    let domain = DomainError::from(src);
+    let back = CredStoreError::from(domain);
+    assert!(
+        matches!(back, CredStoreError::NoPluginAvailable { vendor } if vendor == "acme"),
+        "vendor must survive round-trip without 'unknown' fallback"
+    );
+}
+
+#[test]
+fn roundtrip_credstore_to_domain_preserves_gts_id_and_reason() {
+    let src = CredStoreError::ServiceUnavailable {
+        gts_id: "gts.x.core.creds.plugin.acme.v1~".into(),
+        reason: "down".into(),
+    };
+    let domain = DomainError::from(src);
+    let back = CredStoreError::from(domain);
+    assert!(
+        matches!(back, CredStoreError::ServiceUnavailable { gts_id, reason }
+            if gts_id == "gts.x.core.creds.plugin.acme.v1~" && reason == "down"),
+        "gts_id and reason must survive round-trip without 'unknown' fallback"
     );
 }
 
@@ -144,14 +191,14 @@ fn domain_not_found_becomes_not_found() {
 
 #[test]
 fn domain_types_registry_unavailable_becomes_internal() {
-    let src = DomainError::TypesRegistryUnavailable("gone".into());
+    let src = DomainError::TypesRegistryUnavailable(Box::new(std::io::Error::other("gone")));
     let dst = CredStoreError::from(src);
     assert!(matches!(dst, CredStoreError::Internal(msg) if msg == "gone"));
 }
 
 #[test]
 fn domain_internal_becomes_internal() {
-    let src = DomainError::Internal("err".into());
+    let src = DomainError::Internal(Box::new(std::io::Error::other("err")));
     let dst = CredStoreError::from(src);
     assert!(matches!(dst, CredStoreError::Internal(msg) if msg == "err"));
 }

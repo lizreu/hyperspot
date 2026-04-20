@@ -159,7 +159,7 @@ async fn resolve_plugin_returns_invalid_when_content_malformed() {
 }
 
 #[tokio::test]
-async fn resolve_plugin_returns_internal_when_registry_list_fails() {
+async fn resolve_plugin_returns_types_registry_unavailable_when_registry_list_fails() {
     let hub = Arc::new(ClientHub::default());
     let registry: Arc<dyn TypesRegistryClient> = Arc::new(MockRegistry::failing(
         TypesRegistryError::internal("db down"),
@@ -168,10 +168,13 @@ async fn resolve_plugin_returns_internal_when_registry_list_fails() {
 
     let svc = Service::new(hub, "hyperspot".into());
     let err = svc.resolve_plugin().await.unwrap_err();
-    assert!(
-        matches!(err, DomainError::Internal(ref msg) if msg.contains("db down")),
-        "expected Internal containing 'db down', got: {err:?}"
-    );
+    match &err {
+        DomainError::TypesRegistryUnavailable(src) => assert!(
+            src.to_string().contains("db down"),
+            "expected TypesRegistryUnavailable source containing 'db down', got: {src}"
+        ),
+        _ => panic!("expected TypesRegistryUnavailable, got: {err:?}"),
+    }
 }
 
 #[tokio::test]

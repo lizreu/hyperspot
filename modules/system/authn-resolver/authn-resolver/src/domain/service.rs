@@ -78,7 +78,7 @@ impl Service {
         let registry = self
             .hub
             .get::<dyn TypesRegistryClient>()
-            .map_err(|e| DomainError::TypesRegistryUnavailable(e.to_string()))?;
+            .map_err(|e| DomainError::TypesRegistryUnavailable(Box::new(e)))?;
 
         let plugin_type_id = AuthNResolverPluginSpecV1::gts_schema_id().clone();
 

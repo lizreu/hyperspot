@@ -1,5 +1,6 @@
 /// Errors for the nodes registry module
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum NodesRegistryError {
     #[error("Node not found with ID: {0}")]
     NodeNotFound(uuid::Uuid),
@@ -13,6 +14,6 @@ pub enum NodesRegistryError {
     #[error("Invalid input: {0}")]
     Validation(String),
 
-    #[error("An internal error occurred")]
-    Internal,
+    #[error("internal error: {0}")]
+    Internal(String),
 }

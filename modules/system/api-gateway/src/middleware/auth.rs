@@ -252,12 +252,16 @@ fn authn_error_to_response(err: &AuthNResolverError) -> axum::response::Response
             "Unauthorized",
             "Authentication failed",
         ),
-        AuthNResolverError::NoPluginAvailable | AuthNResolverError::ServiceUnavailable(_) => (
+        AuthNResolverError::NoPluginAvailable { .. }
+        | AuthNResolverError::ServiceUnavailable { .. } => (
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "Service Unavailable",
             "Authentication service unavailable",
         ),
-        AuthNResolverError::TokenAcquisitionFailed(_) | AuthNResolverError::Internal(_) => (
+        // `TokenAcquisitionFailed`, `Internal`, and any future `#[non_exhaustive]`
+        // variants surface as 500 — the client can't distinguish and shouldn't
+        // learn the difference.
+        _ => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             "Internal Server Error",
             "Internal authentication error",
@@ -273,14 +277,17 @@ fn authn_error_to_response(err: &AuthNResolverError) -> axum::response::Response
 fn log_authn_error(err: &AuthNResolverError) {
     match err {
         AuthNResolverError::Unauthorized(msg) => tracing::debug!("AuthN rejected: {msg}"),
-        AuthNResolverError::NoPluginAvailable => tracing::error!("No AuthN plugin available"),
-        AuthNResolverError::ServiceUnavailable(msg) => {
-            tracing::error!("AuthN service unavailable: {msg}");
+        AuthNResolverError::NoPluginAvailable { vendor } => {
+            tracing::error!(vendor = %vendor, "No AuthN plugin available for vendor");
+        }
+        AuthNResolverError::ServiceUnavailable { gts_id, reason } => {
+            tracing::error!(gts_id = %gts_id, reason = %reason, "AuthN plugin unavailable");
         }
         AuthNResolverError::TokenAcquisitionFailed(msg) => {
             tracing::error!("AuthN token acquisition failed: {msg}");
         }
         AuthNResolverError::Internal(msg) => tracing::error!("AuthN internal error: {msg}"),
+        other => tracing::error!(error = %other, "AuthN unknown error variant"),
     }
 }
 

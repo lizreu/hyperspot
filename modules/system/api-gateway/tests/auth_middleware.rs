@@ -883,7 +883,9 @@ async fn test_invalid_token_returns_401() {
 
 #[tokio::test]
 async fn test_no_plugin_available_returns_503() {
-    let mock = mock_returning_error(|| AuthNResolverError::NoPluginAvailable);
+    let mock = mock_returning_error(|| AuthNResolverError::NoPluginAvailable {
+        vendor: "test".into(),
+    });
     let router = create_auth_enabled_router(mock, false).await;
 
     let response = router
@@ -906,8 +908,10 @@ async fn test_no_plugin_available_returns_503() {
 
 #[tokio::test]
 async fn test_service_unavailable_returns_503() {
-    let mock =
-        mock_returning_error(|| AuthNResolverError::ServiceUnavailable("plugin down".to_owned()));
+    let mock = mock_returning_error(|| AuthNResolverError::ServiceUnavailable {
+        gts_id: "test-plugin".into(),
+        reason: "plugin down".into(),
+    });
     let router = create_auth_enabled_router(mock, false).await;
 
     let response = router

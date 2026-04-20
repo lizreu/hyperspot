@@ -176,14 +176,18 @@ impl From<tenant_resolver_sdk::TenantResolverError> for DomainError {
             TenantResolverError::Unauthorized => Self::Forbidden {
                 detail: "tenant resolver: unauthorized".to_string(),
             },
-            TenantResolverError::NoPluginAvailable => Self::Internal {
-                message: "tenant resolver: no plugin available".to_string(),
+            TenantResolverError::NoPluginAvailable { vendor } => Self::Internal {
+                message: format!("tenant resolver: no plugin available for vendor '{vendor}'"),
             },
-            TenantResolverError::ServiceUnavailable(msg) => Self::Internal {
-                message: format!("tenant resolver unavailable: {msg}"),
+            TenantResolverError::ServiceUnavailable { gts_id, reason } => Self::Internal {
+                message: format!("tenant resolver plugin '{gts_id}' unavailable: {reason}"),
             },
             TenantResolverError::Internal(msg) => Self::Internal {
                 message: format!("tenant resolver internal error: {msg}"),
+            },
+            // `TenantResolverError` is `#[non_exhaustive]`; collapse future variants to Internal.
+            other => Self::Internal {
+                message: format!("tenant resolver error: {other}"),
             },
         }
     }

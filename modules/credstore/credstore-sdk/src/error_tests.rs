@@ -8,10 +8,16 @@ fn invalid_ref_constructor_sets_reason() {
 }
 
 #[test]
-fn service_unavailable_constructor_sets_message() {
-    let e = CredStoreError::service_unavailable("backend down");
-    assert!(matches!(e, CredStoreError::ServiceUnavailable(ref m) if m == "backend down"));
-    assert_eq!(e.to_string(), "service unavailable: backend down");
+fn service_unavailable_constructor_sets_fields() {
+    let e = CredStoreError::service_unavailable("gts.x.core.creds.plugin.acme.v1~", "backend down");
+    assert!(
+        matches!(e, CredStoreError::ServiceUnavailable { ref gts_id, ref reason }
+            if gts_id == "gts.x.core.creds.plugin.acme.v1~" && reason == "backend down")
+    );
+    assert_eq!(
+        e.to_string(),
+        "credential plugin 'gts.x.core.creds.plugin.acme.v1~' unavailable: backend down"
+    );
 }
 
 #[test]

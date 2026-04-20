@@ -6,6 +6,7 @@ use crate::TenantId;
 
 /// Errors that can occur when using the tenant resolver API.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum TenantResolverError {
     /// The requested target tenant was not found.
     #[error("tenant not found: {tenant_id}")]
@@ -22,12 +23,20 @@ pub enum TenantResolverError {
     Unauthorized,
 
     /// No plugin is available to handle the request.
-    #[error("no plugin available")]
-    NoPluginAvailable,
+    #[error("no tenant resolver plugin available for vendor '{vendor}'")]
+    NoPluginAvailable {
+        /// Vendor for which no plugin instance could be resolved.
+        vendor: String,
+    },
 
     /// The plugin is not available yet.
-    #[error("service unavailable: {0}")]
-    ServiceUnavailable(String),
+    #[error("tenant resolver plugin '{gts_id}' unavailable: {reason}")]
+    ServiceUnavailable {
+        /// GTS identifier of the plugin instance.
+        gts_id: String,
+        /// Reason the plugin is unavailable.
+        reason: String,
+    },
 
     /// An internal error occurred.
     #[error("internal error: {0}")]

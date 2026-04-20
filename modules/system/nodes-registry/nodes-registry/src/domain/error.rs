@@ -50,7 +50,7 @@ impl From<DomainError> for nodes_registry_sdk::NodesRegistryError {
             DomainError::SysInfoCollectionFailed(msg) => Self::SysInfoCollectionFailed(msg),
             DomainError::SysCapCollectionFailed(msg) => Self::SysCapCollectionFailed(msg),
             DomainError::InvalidInput(msg) => Self::Validation(msg),
-            DomainError::Internal(_) => Self::Internal,
+            DomainError::Internal(msg) => Self::Internal(msg),
         }
     }
 }
